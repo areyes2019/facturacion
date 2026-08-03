@@ -133,7 +133,10 @@ historial de `CotizacionPago`.
 - `GET /api/v1/cotizaciones` — listado paginado. Filtros combinables por columna: `?cliente=`,
   `?rfc=`, `?folio=`, `?estado=`, y por fecha (`?fecha_desde=`/`?fecha_hasta=`, con atajos de UI
   para "Hoy"/"Esta semana"/"Este mes" que solo fijan esos dos parámetros; valor por defecto al
-  cargar la pantalla: "Este mes").
+  cargar la pantalla: "Este mes"). El rango de fecha se interpreta como el día calendario completo
+  en la zona horaria del negocio (`America/Mexico_City`, fija — mono-usuario/mono-empresa, sin
+  configuración por usuario), convertido a UTC antes de comparar contra `created_at` (que se
+  almacena en UTC).
 - `POST /api/v1/cotizaciones` — crea la cotización en `borrador` (recalcula totales en backend,
   `422` si no coincide con lo enviado por el frontend).
 - `GET /api/v1/cotizaciones/{id}` — detalle (incluye líneas y pagos).

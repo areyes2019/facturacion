@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Services\FacturapiService;
 use App\Services\TwilioWhatsAppService;
 use Facturapi\Exceptions\FacturapiException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use PhpCfdi\Rfc\RfcFaker;
 
@@ -369,4 +370,24 @@ test('el listado de cotizaciones filtra por cliente, rfc, folio y estado', funct
     $response->assertOk();
     $response->assertJsonCount(1, 'data');
     $response->assertJsonPath('data.0.estado', 'pagada');
+});
+
+test('el filtro de fecha usa el dia calendario de la zona horaria del negocio, no UTC', function () {
+    $user = User::factory()->create();
+    [$cliente] = crearClienteYArticuloParaCotizacion($user);
+
+    // 2026-08-03 04:16 UTC equivale a 2026-08-02 22:16 en America/Mexico_City (UTC-6): de
+    // noche del dia anterior en hora del negocio, aunque la columna created_at ya cayo en el
+    // dia siguiente en UTC.
+    $cotizacion = Cotizacion::factory()->for($user)->for($cliente)->create();
+    DB::table('cotizaciones')->where('id', $cotizacion->id)->update(['created_at' => '2026-08-03 04:16:00']);
+
+    $filtroDiaUtc = $this->actingAs($user)->getJson('/api/v1/cotizaciones?fecha_desde=2026-08-03&fecha_hasta=2026-08-03');
+    $filtroDiaUtc->assertOk();
+    $filtroDiaUtc->assertJsonCount(0, 'data');
+
+    $filtroDiaNegocio = $this->actingAs($user)->getJson('/api/v1/cotizaciones?fecha_desde=2026-08-02&fecha_hasta=2026-08-02');
+    $filtroDiaNegocio->assertOk();
+    $filtroDiaNegocio->assertJsonCount(1, 'data');
+    $filtroDiaNegocio->assertJsonPath('data.0.id', $cotizacion->id);
 });

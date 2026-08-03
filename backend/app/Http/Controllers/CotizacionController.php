@@ -16,6 +16,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\URL;
@@ -23,6 +24,13 @@ use Illuminate\Validation\ValidationException;
 
 class CotizacionController extends Controller
 {
+    /**
+     * Zona horaria del negocio (mono-usuario/mono-empresa, ver 008-cotizaciones.md): los atajos
+     * "Hoy"/"Esta semana"/"Este mes" del listado representan el día calendario en esta zona, no
+     * en UTC (zona de almacenamiento de `created_at`).
+     */
+    private const ZONA_HORARIA_NEGOCIO = 'America/Mexico_City';
+
     public function __construct(private readonly TwilioWhatsAppService $whatsapp) {}
 
     /**
@@ -43,8 +51,8 @@ class CotizacionController extends Controller
             })
             ->when($request->string('folio')->trim()->isNotEmpty(), fn ($query) => $query->where('folio', 'like', '%'.$request->string('folio')->trim().'%'))
             ->when($request->string('estado')->trim()->isNotEmpty(), fn ($query) => $query->where('estado', (string) $request->string('estado')))
-            ->when($request->string('fecha_desde')->trim()->isNotEmpty(), fn ($query) => $query->whereDate('created_at', '>=', (string) $request->string('fecha_desde')))
-            ->when($request->string('fecha_hasta')->trim()->isNotEmpty(), fn ($query) => $query->whereDate('created_at', '<=', (string) $request->string('fecha_hasta')))
+            ->when($request->string('fecha_desde')->trim()->isNotEmpty(), fn ($query) => $query->where('created_at', '>=', Carbon::parse((string) $request->string('fecha_desde'), self::ZONA_HORARIA_NEGOCIO)->startOfDay()->utc()))
+            ->when($request->string('fecha_hasta')->trim()->isNotEmpty(), fn ($query) => $query->where('created_at', '<=', Carbon::parse((string) $request->string('fecha_hasta'), self::ZONA_HORARIA_NEGOCIO)->endOfDay()->utc()))
             ->orderByDesc('id')
             ->paginate(15);
 
