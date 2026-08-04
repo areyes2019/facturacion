@@ -6,6 +6,8 @@ use App\Http\Requests\Catalogos\StoreCatalogoRequest;
 use App\Http\Requests\Catalogos\UpdateCatalogoRequest;
 use App\Http\Resources\CatalogoResource;
 use App\Models\Catalogo;
+use App\Services\PrecioArticuloCalculator;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
@@ -50,6 +52,47 @@ class CatalogoProveedorController extends Controller
         abort_unless($catalogo->user_id === $request->user()->id, 404);
 
         return new CatalogoResource($catalogo->load('proveedor'));
+    }
+
+    /**
+     * Impacto hipotético de cambiar el descuento o el porcentaje de utilidad del catálogo sobre
+     * los precios de sus artículos, sin persistir nada (ver 011-precio-proveedor-utilidad.md).
+     *
+     * El frontend lo usa para mostrar una vista previa antes de guardar. Devuelve, por artículo,
+     * el costo con descuento y el precio de venta que tendría con los valores propuestos.
+     */
+    public function impactoPrecios(Request $request, Catalogo $catalogo): JsonResponse
+    {
+        abort_unless($catalogo->user_id === $request->user()->id, 404);
+
+        $request->validate([
+            'descuento' => ['required', 'numeric', 'between:0,100', 'decimal:0,2'],
+            'utilidad_porcentaje' => ['required', 'numeric', 'gte:0', 'lt:100', 'decimal:0,2'],
+        ]);
+
+        $descuento = (float) $request->input('descuento');
+        $utilidad = (float) $request->input('utilidad_porcentaje');
+
+        $articulos = $catalogo->articulos()->get(['id', 'nombre', 'modelo', 'precio_proveedor', 'utilidad_porcentaje']);
+
+        $impacto = $articulos->map(function ($articulo) use ($descuento, $utilidad) {
+            $utilidadEfectiva = $articulo->utilidad_porcentaje ?? $utilidad;
+            $cadena = PrecioArticuloCalculator::calcularCadena(
+                (float) $articulo->precio_proveedor,
+                $descuento,
+                (float) $utilidadEfectiva,
+            );
+
+            return [
+                'id' => $articulo->id,
+                'nombre' => $articulo->nombre,
+                'modelo' => $articulo->modelo,
+                'costo_con_descuento' => $cadena['costo_con_descuento'],
+                'precio_unitario_sin_iva' => $cadena['precio_unitario_sin_iva'],
+            ];
+        });
+
+        return response()->json(['articulos' => $impacto]);
     }
 
     /**

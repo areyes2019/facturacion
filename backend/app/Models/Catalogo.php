@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\PrecioArticuloCalculator;
 use Database\Factories\CatalogoFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -9,12 +10,12 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
-use Illuminate\Support\Facades\DB;
 
 #[Fillable([
     'proveedor_id',
     'nombre',
     'descuento',
+    'utilidad_porcentaje',
 ])]
 class Catalogo extends Model
 {
@@ -26,6 +27,7 @@ class Catalogo extends Model
      */
     protected $attributes = [
         'descuento' => 0,
+        'utilidad_porcentaje' => 0,
     ];
 
     public function user(): BelongsTo
@@ -50,29 +52,47 @@ class Catalogo extends Model
     {
         return [
             'descuento' => 'decimal:2',
+            'utilidad_porcentaje' => 'decimal:2',
         ];
     }
 
     protected static function booted(): void
     {
-        // Recálculo en bloque (ver 009-catalogos.md): al editar el descuento, todos los artículos
-        // ya existentes del catálogo actualizan su precio_con_descuento en una sola query, sin
-        // recorrerlos uno por uno con Eloquent. $descuento viene del cast decimal del propio
-        // modelo (numérico garantizado), no de entrada de usuario sin validar, así que interpolarlo
-        // en el SQL crudo es seguro.
+        // Recálculo (ver 011-precio-proveedor-utilidad.md): al editar el descuento o el porcentaje
+        // de utilidad del catálogo, los artículos ya existentes actualizan su cadena de precios. Se
+        // recorre cada artículo y se recalcula en PHP con PrecioArticuloCalculator (la misma lógica
+        // que el resto de la app) en lugar de hacerlo en SQL, porque el techo a 2 decimales (CEIL)
+        // no es portable entre MySQL y SQLite.
         static::updated(function (self $catalogo): void {
-            if (! $catalogo->wasChanged('descuento')) {
-                return;
+            $descuento = (float) $catalogo->descuento;
+            $utilidad = (float) $catalogo->utilidad_porcentaje;
+
+            // Un cambio de descuento mueve el precio de TODOS los artículos del catálogo, incluidos
+            // los que tienen porcentaje propio, porque cambia el costo del que parten.
+            if ($catalogo->wasChanged('descuento')) {
+                foreach ($catalogo->articulos()->get() as $articulo) {
+                    $utilidadEfectiva = (float) ($articulo->utilidad_porcentaje ?? $utilidad);
+                    $articulo->update(PrecioArticuloCalculator::calcularCadena(
+                        (float) $articulo->precio_proveedor,
+                        $descuento,
+                        $utilidadEfectiva,
+                    ));
+                }
             }
 
-            $descuento = (float) $catalogo->descuento;
-
-            // "100.0" (no "100"): en SQLite el operador "/" entre dos literales enteros trunca a
-            // división entera (ej. 20/100 = 0), a diferencia de MySQL que siempre divide en punto
-            // flotante; forzar un literal decimal evita ese truncamiento en ambos motores.
-            $catalogo->articulos()->update([
-                'precio_con_descuento' => DB::raw("ROUND(precio_unitario_sin_iva * (1 - {$descuento} / 100.0), 2)"),
-            ]);
+            // Un cambio de utilidad_porcentaje mueve el precio SOLO de los artículos que heredan el
+            // porcentaje (los que tienen utilidad_porcentaje en NULL); los que tienen porcentaje
+            // propio conservan su precio.
+            if ($catalogo->wasChanged('utilidad_porcentaje')) {
+                foreach ($catalogo->articulos()->whereNull('utilidad_porcentaje')->get() as $articulo) {
+                    $articulo->update([
+                        'precio_unitario_sin_iva' => PrecioArticuloCalculator::precioVentaSinIva(
+                            (float) $articulo->costo_con_descuento,
+                            $utilidad,
+                        ),
+                    ]);
+                }
+            }
         });
     }
 }

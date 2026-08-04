@@ -5,8 +5,11 @@ use App\Http\Controllers\CatalogoController;
 use App\Http\Controllers\CatalogoProveedorController;
 use App\Http\Controllers\ClienteController;
 use App\Http\Controllers\CotizacionController;
+use App\Http\Controllers\CuentaController;
 use App\Http\Controllers\FacturaController;
+use App\Http\Controllers\MovimientoController;
 use App\Http\Controllers\ProveedorController;
+use App\Http\Controllers\TransferenciaController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -35,8 +38,10 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::apiResource('catalogos-proveedor', CatalogoProveedorController::class)
         ->parameters(['catalogos-proveedor' => 'catalogo']);
     Route::post('catalogos-proveedor/{catalogo}/articulos/importar-csv', [ArticuloController::class, 'importarCsv']);
+    Route::post('catalogos-proveedor/{catalogo}/impacto-precios', [CatalogoProveedorController::class, 'impactoPrecios']);
 
     Route::apiResource('facturas', FacturaController::class);
+
     Route::post('facturas/{factura}/timbrar', [FacturaController::class, 'timbrar']);
     Route::post('facturas/{factura}/cancelar', [FacturaController::class, 'cancelar']);
     Route::get('facturas/{factura}/xml', [FacturaController::class, 'xml']);
@@ -48,9 +53,17 @@ Route::middleware(['auth:sanctum'])->group(function () {
         ->parameters(['cotizaciones' => 'cotizacion']);
     Route::post('cotizaciones/{cotizacion}/enviar', [CotizacionController::class, 'enviar']);
     Route::post('cotizaciones/{cotizacion}/pagos', [CotizacionController::class, 'pagos']);
+    Route::delete('cotizaciones/{cotizacion}/pagos/{pago}', [CotizacionController::class, 'eliminarPago']);
     Route::post('cotizaciones/{cotizacion}/entregar', [CotizacionController::class, 'entregar']);
     Route::post('cotizaciones/{cotizacion}/duplicar', [CotizacionController::class, 'duplicar']);
     Route::get('cotizaciones/{cotizacion}/pdf', [CotizacionController::class, 'pdf']);
+
+    // Tesorería (ver 010-tesoreria.md). "saldos" se registra antes del apiResource para que no lo
+    // capture el parámetro {cuenta}, igual que articulos/exportar-csv más arriba.
+    Route::get('cuentas/saldos', [CuentaController::class, 'saldos']);
+    Route::apiResource('cuentas', CuentaController::class);
+    Route::apiResource('movimientos', MovimientoController::class);
+    Route::post('transferencias', [TransferenciaController::class, 'store']);
 
     Route::prefix('catalogos')->group(function () {
         Route::get('regimenes-fiscales', [CatalogoController::class, 'regimenesFiscales']);

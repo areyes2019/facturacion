@@ -24,6 +24,7 @@ class CatalogoFactory extends Factory
             'proveedor_id' => Proveedor::factory(),
             'nombre' => $this->faker->unique()->words(2, true),
             'descuento' => 0,
+            'utilidad_porcentaje' => 0,
         ];
     }
 }

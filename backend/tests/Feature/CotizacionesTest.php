@@ -6,6 +6,7 @@ use App\Models\Articulo;
 use App\Models\Catalogo;
 use App\Models\Cliente;
 use App\Models\Cotizacion;
+use App\Models\Cuenta;
 use App\Models\Factura;
 use App\Models\Proveedor;
 use App\Models\User;
@@ -139,11 +140,12 @@ test('un pago que cubre el total marca la cotizacion como pagada', function () {
     $user = User::factory()->create();
     [$cliente] = crearClienteYArticuloParaCotizacion($user);
     $cotizacion = Cotizacion::factory()->for($user)->for($cliente)->create(['estado' => EstadoCotizacion::Enviada->value, 'total' => 232.00]);
+    $cuenta = Cuenta::factory()->for($user)->create();
 
     $response = $this->actingAs($user)->postJson("/api/v1/cotizaciones/{$cotizacion->id}/pagos", [
         'tipo' => 'pago_total',
         'fecha_pago' => now()->toDateString(),
-        'forma_pago' => '03',
+        'cuenta_id' => $cuenta->id,
     ]);
 
     $response->assertOk();
@@ -156,12 +158,13 @@ test('un pago parcial no marca la cotizacion como pagada', function () {
     $user = User::factory()->create();
     [$cliente] = crearClienteYArticuloParaCotizacion($user);
     $cotizacion = Cotizacion::factory()->for($user)->for($cliente)->create(['estado' => EstadoCotizacion::Enviada->value, 'total' => 232.00]);
+    $cuenta = Cuenta::factory()->for($user)->create();
 
     $response = $this->actingAs($user)->postJson("/api/v1/cotizaciones/{$cotizacion->id}/pagos", [
         'tipo' => 'anticipo',
         'fecha_pago' => now()->toDateString(),
         'monto' => 100.00,
-        'forma_pago' => '03',
+        'cuenta_id' => $cuenta->id,
     ]);
 
     $response->assertOk();
@@ -173,18 +176,19 @@ test('un anticipo seguido de saldo cubre el total y marca la cotizacion como pag
     $user = User::factory()->create();
     [$cliente] = crearClienteYArticuloParaCotizacion($user);
     $cotizacion = Cotizacion::factory()->for($user)->for($cliente)->create(['estado' => EstadoCotizacion::Enviada->value, 'total' => 232.00]);
+    $cuenta = Cuenta::factory()->for($user)->create();
 
     $this->actingAs($user)->postJson("/api/v1/cotizaciones/{$cotizacion->id}/pagos", [
         'tipo' => 'anticipo',
         'fecha_pago' => now()->toDateString(),
         'monto' => 100.00,
-        'forma_pago' => '03',
+        'cuenta_id' => $cuenta->id,
     ])->assertOk();
 
     $response = $this->actingAs($user)->postJson("/api/v1/cotizaciones/{$cotizacion->id}/pagos", [
         'tipo' => 'saldo',
         'fecha_pago' => now()->toDateString(),
-        'forma_pago' => '03',
+        'cuenta_id' => $cuenta->id,
     ]);
 
     $response->assertOk();
@@ -197,19 +201,20 @@ test('un segundo anticipo para la misma cotizacion es rechazado', function () {
     $user = User::factory()->create();
     [$cliente] = crearClienteYArticuloParaCotizacion($user);
     $cotizacion = Cotizacion::factory()->for($user)->for($cliente)->create(['estado' => EstadoCotizacion::Enviada->value, 'total' => 232.00]);
+    $cuenta = Cuenta::factory()->for($user)->create();
 
     $this->actingAs($user)->postJson("/api/v1/cotizaciones/{$cotizacion->id}/pagos", [
         'tipo' => 'anticipo',
         'fecha_pago' => now()->toDateString(),
         'monto' => 100.00,
-        'forma_pago' => '03',
+        'cuenta_id' => $cuenta->id,
     ])->assertOk();
 
     $response = $this->actingAs($user)->postJson("/api/v1/cotizaciones/{$cotizacion->id}/pagos", [
         'tipo' => 'anticipo',
         'fecha_pago' => now()->toDateString(),
         'monto' => 50.00,
-        'forma_pago' => '03',
+        'cuenta_id' => $cuenta->id,
     ]);
 
     $response->assertUnprocessable();
@@ -220,12 +225,13 @@ test('un anticipo mayor al saldo pendiente es rechazado', function () {
     $user = User::factory()->create();
     [$cliente] = crearClienteYArticuloParaCotizacion($user);
     $cotizacion = Cotizacion::factory()->for($user)->for($cliente)->create(['estado' => EstadoCotizacion::Enviada->value, 'total' => 232.00]);
+    $cuenta = Cuenta::factory()->for($user)->create();
 
     $response = $this->actingAs($user)->postJson("/api/v1/cotizaciones/{$cotizacion->id}/pagos", [
         'tipo' => 'anticipo',
         'fecha_pago' => now()->toDateString(),
         'monto' => 300.00,
-        'forma_pago' => '03',
+        'cuenta_id' => $cuenta->id,
     ]);
 
     $response->assertUnprocessable();
@@ -236,12 +242,13 @@ test('el monto enviado para saldo o pago total se ignora y se autocalcula el sal
     $user = User::factory()->create();
     [$cliente] = crearClienteYArticuloParaCotizacion($user);
     $cotizacion = Cotizacion::factory()->for($user)->for($cliente)->create(['estado' => EstadoCotizacion::Enviada->value, 'total' => 232.00]);
+    $cuenta = Cuenta::factory()->for($user)->create();
 
     $response = $this->actingAs($user)->postJson("/api/v1/cotizaciones/{$cotizacion->id}/pagos", [
         'tipo' => 'pago_total',
         'fecha_pago' => now()->toDateString(),
         'monto' => 1.00,
-        'forma_pago' => '03',
+        'cuenta_id' => $cuenta->id,
     ]);
 
     $response->assertOk();

@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Services\PrecioArticuloCalculator;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -14,6 +15,8 @@ class ArticuloResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        $catalogo = $this->whenLoaded('catalogo');
+
         return [
             'id' => $this->id,
             'catalogo_id' => $this->catalogo_id,
@@ -28,9 +31,16 @@ class ArticuloResource extends JsonResource
             'clave_prod_serv' => $this->clave_prod_serv,
             'clave_unidad' => $this->clave_unidad,
             'objeto_imp' => $this->objeto_imp->value,
+            'precio_proveedor' => (float) $this->precio_proveedor,
+            'utilidad_porcentaje' => $this->utilidad_porcentaje === null ? null : (float) $this->utilidad_porcentaje,
+            'utilidad_porcentaje_efectivo' => $this->whenLoaded(
+                'catalogo',
+                fn () => PrecioArticuloCalculator::utilidadEfectiva($this->resource, $this->catalogo)
+            ),
+            'costo_con_descuento' => (float) $this->costo_con_descuento,
             'precio_unitario_sin_iva' => (float) $this->precio_unitario_sin_iva,
             'precio_unitario_con_iva' => $this->precio_unitario_con_iva,
-            'precio_con_descuento' => (float) $this->precio_con_descuento,
+            'utilidad' => $this->utilidad,
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
         ];

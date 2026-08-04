@@ -5,7 +5,7 @@ namespace App\Http\Resources;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
-class CatalogoResource extends JsonResource
+class CuentaResource extends JsonResource
 {
     /**
      * Transform the resource into an array.
@@ -16,11 +16,12 @@ class CatalogoResource extends JsonResource
     {
         return [
             'id' => $this->id,
-            'proveedor_id' => $this->proveedor_id,
-            'proveedor_nombre_comercial' => $this->whenLoaded('proveedor', fn () => $this->proveedor->nombre_comercial),
             'nombre' => $this->nombre,
-            'descuento' => (float) $this->descuento,
-            'utilidad_porcentaje' => (float) $this->utilidad_porcentaje,
+            'tipo' => $this->tipo->value,
+            'tipo_texto' => $this->tipo->texto(),
+            'saldo_inicial' => (float) $this->saldo_inicial,
+            'saldo_actual' => (float) $this->saldo_actual,
+            'activa' => (bool) $this->activa,
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
         ];

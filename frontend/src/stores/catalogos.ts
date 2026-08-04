@@ -8,6 +8,7 @@ export interface Catalogo {
   proveedor_nombre_comercial: string | null
   nombre: string
   descuento: number
+  utilidad_porcentaje: number
   created_at: string
   updated_at: string
 }
@@ -16,6 +17,7 @@ export interface CatalogoPayload {
   proveedor_id?: number | null
   nombre: string
   descuento: number | null
+  utilidad_porcentaje: number | null
 }
 
 interface PaginationMeta {

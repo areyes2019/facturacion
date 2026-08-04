@@ -21,6 +21,7 @@ class StoreCatalogoRequest extends FormRequest
         $this->merge([
             'nombre' => is_string($this->nombre) ? trim($this->nombre) : $this->nombre,
             'descuento' => $this->descuento === null || $this->descuento === '' ? 0 : $this->descuento,
+            'utilidad_porcentaje' => $this->utilidad_porcentaje === null || $this->utilidad_porcentaje === '' ? 0 : $this->utilidad_porcentaje,
         ]);
     }
 
@@ -48,6 +49,7 @@ class StoreCatalogoRequest extends FormRequest
                     ->whereNull('deleted_at'),
             ],
             'descuento' => ['required', 'numeric', 'between:0,100', 'decimal:0,2'],
+            'utilidad_porcentaje' => ['required', 'numeric', 'gte:0', 'lt:100', 'decimal:0,2'],
         ];
     }
 }

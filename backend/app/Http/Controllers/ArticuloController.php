@@ -10,6 +10,7 @@ use App\Models\Articulo;
 use App\Models\Catalogo;
 use App\Rules\ClaveProdServValido;
 use App\Rules\ClaveUnidadValido;
+use App\Services\PrecioArticuloCalculator;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -28,7 +29,7 @@ class ArticuloController extends Controller
         'clave_prod_serv',
         'clave_unidad',
         'objeto_imp',
-        'precio_unitario_sin_iva',
+        'precio_proveedor',
     ];
 
     /**
@@ -51,9 +52,18 @@ class ArticuloController extends Controller
     {
         $datos = $request->validated();
         $catalogo = Catalogo::findOrFail($datos['catalogo_id']);
-        $datos['precio_con_descuento'] = $this->calcularPrecioConDescuento((float) $datos['precio_unitario_sin_iva'], $catalogo);
 
-        $articulo = $request->user()->articulos()->create($datos);
+        $cadena = PrecioArticuloCalculator::calcularCadena(
+            (float) $datos['precio_proveedor'],
+            (float) $catalogo->descuento,
+            (float) ($datos['utilidad_porcentaje'] ?? $catalogo->utilidad_porcentaje),
+        );
+
+        $articulo = $request->user()->articulos()->create([
+            ...$datos,
+            'costo_con_descuento' => $cadena['costo_con_descuento'],
+            'precio_unitario_sin_iva' => $cadena['precio_unitario_sin_iva'],
+        ]);
 
         return new ArticuloResource($articulo->load('catalogo.proveedor'));
     }
@@ -77,9 +87,18 @@ class ArticuloController extends Controller
 
         $datos = $request->validated();
         $catalogo = Catalogo::findOrFail($datos['catalogo_id']);
-        $datos['precio_con_descuento'] = $this->calcularPrecioConDescuento((float) $datos['precio_unitario_sin_iva'], $catalogo);
 
-        $articulo->update($datos);
+        $cadena = PrecioArticuloCalculator::calcularCadena(
+            (float) $datos['precio_proveedor'],
+            (float) $catalogo->descuento,
+            (float) ($datos['utilidad_porcentaje'] ?? $catalogo->utilidad_porcentaje),
+        );
+
+        $articulo->update([
+            ...$datos,
+            'costo_con_descuento' => $cadena['costo_con_descuento'],
+            'precio_unitario_sin_iva' => $cadena['precio_unitario_sin_iva'],
+        ]);
 
         return new ArticuloResource($articulo->load('catalogo.proveedor'));
     }
@@ -136,7 +155,7 @@ class ArticuloController extends Controller
                     'clave_prod_serv' => trim((string) ($datos['clave_prod_serv'] ?? '')),
                     'clave_unidad' => strtoupper(trim((string) ($datos['clave_unidad'] ?? ''))),
                     'objeto_imp' => trim((string) ($datos['objeto_imp'] ?? '')),
-                    'precio_unitario_sin_iva' => trim((string) ($datos['precio_unitario_sin_iva'] ?? '')),
+                    'precio_proveedor' => trim((string) ($datos['precio_proveedor'] ?? '')),
                 ],
                 [
                     'nombre' => [
@@ -151,7 +170,7 @@ class ArticuloController extends Controller
                     'clave_prod_serv' => ['required', 'string', new ClaveProdServValido],
                     'clave_unidad' => ['required', 'string', new ClaveUnidadValido],
                     'objeto_imp' => ['required', Rule::enum(ObjetoImpuesto::class)],
-                    'precio_unitario_sin_iva' => ['required', 'numeric', 'gt:0', 'decimal:0,2'],
+                    'precio_proveedor' => ['required', 'numeric', 'gt:0', 'decimal:0,2'],
                 ],
             );
 
@@ -163,10 +182,17 @@ class ArticuloController extends Controller
 
             $filaValidada = $validator->validated();
 
+            $cadena = PrecioArticuloCalculator::calcularCadena(
+                (float) $filaValidada['precio_proveedor'],
+                (float) $catalogo->descuento,
+                (float) $catalogo->utilidad_porcentaje,
+            );
+
             $request->user()->articulos()->create([
                 ...$filaValidada,
                 'catalogo_id' => $catalogo->id,
-                'precio_con_descuento' => $this->calcularPrecioConDescuento((float) $filaValidada['precio_unitario_sin_iva'], $catalogo),
+                'costo_con_descuento' => $cadena['costo_con_descuento'],
+                'precio_unitario_sin_iva' => $cadena['precio_unitario_sin_iva'],
             ]);
             $importados++;
         }
@@ -197,7 +223,7 @@ class ArticuloController extends Controller
                     $articulo->clave_prod_serv,
                     $articulo->clave_unidad,
                     $articulo->objeto_imp->value,
-                    $articulo->precio_unitario_sin_iva,
+                    $articulo->precio_proveedor,
                 ]);
             }
 
@@ -219,14 +245,5 @@ class ArticuloController extends Controller
                     ->orWhereHas('catalogo.proveedor', fn ($query) => $query->where('nombre_comercial', 'like', $search));
             });
         });
-    }
-
-    /**
-     * precio_con_descuento = precio_unitario_sin_iva * (1 - descuento_del_catalogo / 100),
-     * redondeado a 2 decimales (ver 009-catalogos.md).
-     */
-    private function calcularPrecioConDescuento(float $precioSinIva, Catalogo $catalogo): float
-    {
-        return round($precioSinIva * (1 - ((float) $catalogo->descuento) / 100), 2);
     }
 }

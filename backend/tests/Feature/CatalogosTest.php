@@ -10,6 +10,7 @@ function datosCatalogoValidos(array $overrides = []): array
     return array_merge([
         'nombre' => 'Catálogo Premium',
         'descuento' => 10,
+        'utilidad_porcentaje' => 0,
     ], $overrides);
 }
 
@@ -28,6 +29,7 @@ test('un usuario autenticado puede crear un catalogo para uno de sus proveedores
     $response->assertCreated();
     $response->assertJsonPath('data.nombre', 'Catálogo Premium');
     $response->assertJsonPath('data.descuento', 10);
+    $response->assertJsonPath('data.utilidad_porcentaje', 0);
     $response->assertJsonPath('data.proveedor_id', $proveedor->id);
     $this->assertDatabaseHas('catalogos', [
         'user_id' => $user->id,
@@ -36,7 +38,7 @@ test('un usuario autenticado puede crear un catalogo para uno de sus proveedores
     ]);
 });
 
-test('omitir el descuento al crear un catalogo lo deja en cero', function () {
+test('omitir el descuento y la utilidad al crear un catalogo los deja en cero', function () {
     $user = User::factory()->create();
     $proveedor = Proveedor::factory()->for($user)->create();
 
@@ -47,6 +49,7 @@ test('omitir el descuento al crear un catalogo lo deja en cero', function () {
 
     $response->assertCreated();
     $response->assertJsonPath('data.descuento', 0);
+    $response->assertJsonPath('data.utilidad_porcentaje', 0);
 });
 
 test('no se puede crear un catalogo sin proveedor', function () {
@@ -82,6 +85,19 @@ test('un descuento fuera del rango 0 a 100 no permite crear el catalogo', functi
 
     $response->assertUnprocessable();
     $response->assertJsonValidationErrors('descuento');
+});
+
+test('un porcentaje de utilidad fuera de rango no permite crear el catalogo', function () {
+    $user = User::factory()->create();
+    $proveedor = Proveedor::factory()->for($user)->create();
+
+    $response = $this->actingAs($user)->postJson('/api/v1/catalogos-proveedor', datosCatalogoValidos([
+        'proveedor_id' => $proveedor->id,
+        'utilidad_porcentaje' => 100,
+    ]));
+
+    $response->assertUnprocessable();
+    $response->assertJsonValidationErrors('utilidad_porcentaje');
 });
 
 test('un nombre de catalogo duplicado en el mismo proveedor es rechazado', function () {
@@ -140,19 +156,21 @@ test('un usuario no puede ver el catalogo de otro usuario', function () {
     $this->actingAs($user)->getJson("/api/v1/catalogos-proveedor/{$catalogo->id}")->assertNotFound();
 });
 
-test('editar un catalogo existente permite modificar nombre y descuento', function () {
+test('editar un catalogo existente permite modificar nombre descuento y utilidad', function () {
     $user = User::factory()->create();
     $proveedor = Proveedor::factory()->for($user)->create();
-    $catalogo = Catalogo::factory()->for($user)->for($proveedor)->create(['nombre' => 'Catálogo Original', 'descuento' => 5]);
+    $catalogo = Catalogo::factory()->for($user)->for($proveedor)->create(['nombre' => 'Catálogo Original', 'descuento' => 5, 'utilidad_porcentaje' => 0]);
 
     $response = $this->actingAs($user)->putJson("/api/v1/catalogos-proveedor/{$catalogo->id}", [
         'nombre' => 'Catálogo Renombrado',
         'descuento' => 20,
+        'utilidad_porcentaje' => 15,
     ]);
 
     $response->assertOk();
     $response->assertJsonPath('data.nombre', 'Catálogo Renombrado');
     $response->assertJsonPath('data.descuento', 20);
+    $response->assertJsonPath('data.utilidad_porcentaje', 15);
     $this->assertDatabaseHas('catalogos', ['id' => $catalogo->id, 'nombre' => 'Catálogo Renombrado']);
 });
 
@@ -171,22 +189,90 @@ test('editar un catalogo no permite cambiar el proveedor', function () {
     $this->assertDatabaseHas('catalogos', ['id' => $catalogo->id, 'proveedor_id' => $proveedorOriginal->id]);
 });
 
-test('editar el descuento de un catalogo recalcula el precio con descuento de sus articulos', function () {
+test('editar el descuento de un catalogo recalcula la cadena de precios de sus articulos', function () {
     $user = User::factory()->create();
     $proveedor = Proveedor::factory()->for($user)->create();
-    $catalogo = Catalogo::factory()->for($user)->for($proveedor)->create(['descuento' => 0]);
+    $catalogo = Catalogo::factory()->for($user)->for($proveedor)->create(['descuento' => 0, 'utilidad_porcentaje' => 0]);
     $articulo = Articulo::factory()->for($user)->for($catalogo)->create([
+        'precio_proveedor' => 1000,
+        'costo_con_descuento' => 1000,
         'precio_unitario_sin_iva' => 1000,
-        'precio_con_descuento' => 1000,
     ]);
 
     $response = $this->actingAs($user)->putJson("/api/v1/catalogos-proveedor/{$catalogo->id}", [
         'nombre' => $catalogo->nombre,
         'descuento' => 20,
+        'utilidad_porcentaje' => 0,
     ]);
 
     $response->assertOk();
-    $this->assertDatabaseHas('articulos', ['id' => $articulo->id, 'precio_con_descuento' => 800]);
+    $this->assertDatabaseHas('articulos', ['id' => $articulo->id, 'costo_con_descuento' => 800, 'precio_unitario_sin_iva' => 800]);
+});
+
+test('editar la utilidad de un catalogo recalcula el precio de venta de los articulos que heredan el porcentaje', function () {
+    $user = User::factory()->create();
+    $proveedor = Proveedor::factory()->for($user)->create();
+    $catalogo = Catalogo::factory()->for($user)->for($proveedor)->create(['descuento' => 0, 'utilidad_porcentaje' => 0]);
+    // Artículo que hereda el porcentaje del catálogo (utilidad_porcentaje NULL).
+    $hereda = Articulo::factory()->for($user)->for($catalogo)->create([
+        'precio_proveedor' => 210,
+        'costo_con_descuento' => 210,
+        'precio_unitario_sin_iva' => 210,
+        'utilidad_porcentaje' => null,
+    ]);
+    // Artículo con porcentaje propio: su precio no debe moverse.
+    $propio = Articulo::factory()->for($user)->for($catalogo)->create([
+        'precio_proveedor' => 210,
+        'costo_con_descuento' => 210,
+        'precio_unitario_sin_iva' => 300,
+        'utilidad_porcentaje' => 30,
+    ]);
+
+    $response = $this->actingAs($user)->putJson("/api/v1/catalogos-proveedor/{$catalogo->id}", [
+        'nombre' => $catalogo->nombre,
+        'descuento' => 0,
+        'utilidad_porcentaje' => 30,
+    ]);
+
+    $response->assertOk();
+    // El que hereda pasa de 210 a techo(210 / 0.70) = 300.
+    $this->assertDatabaseHas('articulos', ['id' => $hereda->id, 'precio_unitario_sin_iva' => 300]);
+    // El que tiene porcentaje propio conserva su precio.
+    $this->assertDatabaseHas('articulos', ['id' => $propio->id, 'precio_unitario_sin_iva' => 300]);
+});
+
+test('el endpoint de impacto de precios devuelve la vista previa sin persistir', function () {
+    $user = User::factory()->create();
+    $proveedor = Proveedor::factory()->for($user)->create();
+    $catalogo = Catalogo::factory()->for($user)->for($proveedor)->create(['descuento' => 0, 'utilidad_porcentaje' => 0]);
+    $articulo = Articulo::factory()->for($user)->for($catalogo)->create([
+        'precio_proveedor' => 1000,
+        'costo_con_descuento' => 1000,
+        'precio_unitario_sin_iva' => 1000,
+    ]);
+
+    $response = $this->actingAs($user)->postJson("/api/v1/catalogos-proveedor/{$catalogo->id}/impacto-precios", [
+        'descuento' => 20,
+        'utilidad_porcentaje' => 0,
+    ]);
+
+    $response->assertOk();
+    $response->assertJsonPath('articulos.0.id', $articulo->id);
+    $response->assertJsonPath('articulos.0.costo_con_descuento', 800);
+    $response->assertJsonPath('articulos.0.precio_unitario_sin_iva', 800);
+    // No debe persistir nada.
+    $this->assertDatabaseHas('articulos', ['id' => $articulo->id, 'costo_con_descuento' => 1000, 'precio_unitario_sin_iva' => 1000]);
+});
+
+test('el endpoint de impacto de precios no permite consultar el catalogo de otro usuario', function () {
+    $user = User::factory()->create();
+    $otro = User::factory()->create();
+    $catalogoAjeno = Catalogo::factory()->for($otro)->create();
+
+    $this->actingAs($user)->postJson("/api/v1/catalogos-proveedor/{$catalogoAjeno->id}/impacto-precios", [
+        'descuento' => 10,
+        'utilidad_porcentaje' => 0,
+    ])->assertNotFound();
 });
 
 test('eliminar un catalogo sin articulos lo remueve del listado pero no lo borra fisicamente', function () {
