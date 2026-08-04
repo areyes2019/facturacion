@@ -12,6 +12,7 @@ import {
 import {
   useCotizacionesStore,
   type Cotizacion,
+  type CotizacionPago,
   type EstadoCotizacion,
   type TipoPagoCotizacion,
 } from '../stores/cotizaciones'
@@ -39,7 +40,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from '../components/ui/dialog'
-import FormaPagoSelect from '../components/FormaPagoSelect.vue'
+import CuentaSelect from '../components/CuentaSelect.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -160,12 +161,14 @@ async function onDescargarPdf() {
   }
 }
 
-// Registro de pagos.
+// Registro de pagos. El pago entra a una cuenta de Tesorería (no a una forma de pago del catálogo
+// SAT, que en una cotización nunca se timbraba) y genera ahí un movimiento de ingreso automático
+// (ver 010-tesoreria.md).
 const mostrarPago = ref(false)
 const tipoPago = ref<TipoPagoCotizacion>('anticipo')
 const fechaPago = ref('')
 const montoPago = ref<number | null>(null)
-const formaPagoPago = ref<string | null>(null)
+const cuentaPago = ref<number | null>(null)
 const registrandoPago = ref(false)
 const errorPago = ref<string | null>(null)
 
@@ -173,13 +176,13 @@ function abrirPago(tipo: TipoPagoCotizacion) {
   tipoPago.value = tipo
   fechaPago.value = new Date().toISOString().slice(0, 10)
   montoPago.value = null
-  formaPagoPago.value = null
+  cuentaPago.value = null
   errorPago.value = null
   mostrarPago.value = true
 }
 
 async function confirmarPago() {
-  if (!cotizacion.value || !formaPagoPago.value) return
+  if (!cotizacion.value || !cuentaPago.value) return
   if (tipoPago.value === 'anticipo' && !montoPago.value) return
 
   registrandoPago.value = true
@@ -191,13 +194,43 @@ async function confirmarPago() {
       // "saldo"/"pago_total" siempre los autocalcula el backend como el saldo pendiente; solo
       // "anticipo" manda un monto libre (ver 008-cotizaciones.md).
       monto: tipoPago.value === 'anticipo' ? montoPago.value : null,
-      forma_pago: formaPagoPago.value,
+      cuenta_id: cuentaPago.value,
     })
     mostrarPago.value = false
   } catch (err) {
     errorPago.value = extractErrorMessage(err)
   } finally {
     registrandoPago.value = false
+  }
+}
+
+// Eliminación de pagos: solo el más reciente (criterio LIFO), y no si el producto ya se entregó.
+const pagoAEliminar = ref<CotizacionPago | null>(null)
+const eliminandoPago = ref(false)
+const errorEliminarPago = ref<string | null>(null)
+
+const pagoMasReciente = computed(() => {
+  const pagos = cotizacion.value?.pagos ?? []
+  return pagos.length > 0 ? pagos[pagos.length - 1] : null
+})
+
+function puedeEliminarPago(pago: CotizacionPago) {
+  return pago.id === pagoMasReciente.value?.id && cotizacion.value?.estado !== 'producto_entregado'
+}
+
+async function confirmarEliminarPago() {
+  if (!cotizacion.value || !pagoAEliminar.value) return
+
+  eliminandoPago.value = true
+  errorEliminarPago.value = null
+  try {
+    await cotizacionesStore.eliminarPago(cotizacion.value.id, pagoAEliminar.value.id)
+    pagoAEliminar.value = null
+    await cargar()
+  } catch (err) {
+    errorEliminarPago.value = extractErrorMessage(err)
+  } finally {
+    eliminandoPago.value = false
   }
 }
 
@@ -326,7 +359,8 @@ async function onDuplicar() {
                   <TableHead>Tipo</TableHead>
                   <TableHead>Fecha</TableHead>
                   <TableHead class="text-right">Monto</TableHead>
-                  <TableHead>Forma de pago</TableHead>
+                  <TableHead>Cuenta</TableHead>
+                  <TableHead class="text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -334,7 +368,19 @@ async function onDuplicar() {
                   <TableCell>{{ pago.tipo }}</TableCell>
                   <TableCell>{{ pago.fecha_pago }}</TableCell>
                   <TableCell class="text-right">${{ pago.monto.toFixed(2) }}</TableCell>
-                  <TableCell>{{ pago.forma_pago }}</TableCell>
+                  <TableCell>{{ pago.cuenta_nombre ?? '—' }}</TableCell>
+                  <TableCell class="text-right">
+                    <!-- Solo el pago más reciente se puede eliminar (criterio LIFO): el monto de
+                         saldo/pago total se autocalcula a partir de los previos. -->
+                    <Button
+                      v-if="puedeEliminarPago(pago)"
+                      variant="outline"
+                      size="sm"
+                      @click="pagoAEliminar = pago"
+                    >
+                      Eliminar
+                    </Button>
+                  </TableCell>
                 </TableRow>
               </TableBody>
             </Table>
@@ -476,8 +522,8 @@ async function onDuplicar() {
               (saldo pendiente).
             </p>
             <div class="space-y-1.5">
-              <Label>Forma de pago</Label>
-              <FormaPagoSelect v-model="formaPagoPago" />
+              <Label>Cuenta</Label>
+              <CuentaSelect v-model="cuentaPago" />
             </div>
           </div>
           <Alert v-if="errorPago" variant="destructive">
@@ -489,6 +535,30 @@ async function onDuplicar() {
             </Button>
             <Button :disabled="registrandoPago" @click="confirmarPago">
               {{ registrandoPago ? 'Registrando...' : 'Registrar' }}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog :open="pagoAEliminar !== null" @update:open="(v) => !v && (pagoAEliminar = null)">
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Eliminar pago</DialogTitle>
+            <DialogDescription>
+              Se eliminará el pago de ${{ (pagoAEliminar?.monto ?? 0).toFixed(2) }} y su movimiento
+              de ingreso en Tesorería, y el saldo de la cuenta se recalculará. Si la cotización
+              estaba pagada y ya no alcanza su total, volverá a "enviada".
+            </DialogDescription>
+          </DialogHeader>
+          <Alert v-if="errorEliminarPago" variant="destructive">
+            <AlertDescription>{{ errorEliminarPago }}</AlertDescription>
+          </Alert>
+          <DialogFooter>
+            <Button variant="outline" :disabled="eliminandoPago" @click="pagoAEliminar = null">
+              Cancelar
+            </Button>
+            <Button variant="destructive" :disabled="eliminandoPago" @click="confirmarEliminarPago">
+              Eliminar
             </Button>
           </DialogFooter>
         </DialogContent>

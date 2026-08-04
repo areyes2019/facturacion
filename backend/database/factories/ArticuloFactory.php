@@ -20,9 +20,10 @@ class ArticuloFactory extends Factory
      */
     public function definition(): array
     {
-        // precio_con_descuento asume el 0% de descuento por defecto del catálogo del factory
-        // (CatalogoFactory); si un test asocia el artículo a un catálogo con otro descuento debe
-        // sobreescribir este campo explícitamente.
+        // La cadena de precios asume el 0% de descuento y 0% de utilidad por defecto del catálogo
+        // del factory (CatalogoFactory), así que costo_con_descuento y precio_unitario_sin_iva
+        // coinciden con precio_proveedor. Si un test asocia el artículo a un catálogo con otro
+        // descuento o utilidad debe sobreescribir estos campos explícitamente (ver 011).
         $precio = $this->faker->randomFloat(2, 10, 5000);
 
         return [
@@ -33,8 +34,10 @@ class ArticuloFactory extends Factory
             'clave_prod_serv' => '43211503',
             'clave_unidad' => 'H87',
             'objeto_imp' => ObjetoImpuesto::SiObjeto,
+            'precio_proveedor' => $precio,
+            'utilidad_porcentaje' => null,
+            'costo_con_descuento' => $precio,
             'precio_unitario_sin_iva' => $precio,
-            'precio_con_descuento' => $precio,
         ];
     }
 }

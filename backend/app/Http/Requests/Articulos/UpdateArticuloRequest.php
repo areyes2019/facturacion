@@ -66,7 +66,8 @@ class UpdateArticuloRequest extends FormRequest
             'clave_prod_serv' => ['required', 'string', new ClaveProdServValido],
             'clave_unidad' => ['required', 'string', new ClaveUnidadValido],
             'objeto_imp' => ['required', Rule::enum(ObjetoImpuesto::class)],
-            'precio_unitario_sin_iva' => ['required', 'numeric', 'gt:0', 'decimal:0,2'],
+            'precio_proveedor' => ['required', 'numeric', 'gt:0', 'decimal:0,2'],
+            'utilidad_porcentaje' => ['nullable', 'numeric', 'gte:0', 'lt:100', 'decimal:0,2'],
         ];
     }
 }

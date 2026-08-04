@@ -25,7 +25,8 @@ export interface CotizacionPago {
   tipo: TipoPagoCotizacion
   fecha_pago: string
   monto: number
-  forma_pago: string
+  cuenta_id: number | null
+  cuenta_nombre: string | null
   created_at: string
 }
 
@@ -165,11 +166,19 @@ export const useCotizacionesStore = defineStore('cotizaciones', {
         tipo: TipoPagoCotizacion
         fecha_pago: string
         monto: number | null
-        forma_pago: string
+        cuenta_id: number
       },
     ): Promise<Cotizacion> {
       const { data } = await http.post(`/cotizaciones/${id}/pagos`, payload)
       return data.data
+    },
+
+    /**
+     * Solo se permite sobre el pago más reciente (LIFO): revierte su movimiento en Tesorería y,
+     * si la cotización ya no alcanza su total, la regresa de `pagada` a `enviada`.
+     */
+    async eliminarPago(cotizacionId: number, pagoId: number) {
+      await http.delete(`/cotizaciones/${cotizacionId}/pagos/${pagoId}`)
     },
 
     async entregar(id: number): Promise<Cotizacion> {

@@ -1,11 +1,22 @@
 <script setup lang="ts">
-import { useRouter } from 'vue-router'
-import { ArrowRightStartOnRectangleIcon } from '@heroicons/vue/24/outline'
+import { computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ArrowRightStartOnRectangleIcon, ChevronDownIcon } from '@heroicons/vue/24/outline'
 import { useAuthStore } from '../stores/auth'
 import { Button } from '../components/ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover'
 
+const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+
+const entradasContabilidad = [
+  { name: 'cuentas', etiqueta: 'Cuentas' },
+  { name: 'movimientos', etiqueta: 'Movimientos' },
+  { name: 'saldos', etiqueta: 'Saldos' },
+]
+
+const rutaContabilidadActiva = computed(() => route.path.startsWith('/tesoreria'))
 
 async function onLogout() {
   await auth.logout()
@@ -71,6 +82,28 @@ async function onLogout() {
             >
               Cotizaciones
             </RouterLink>
+            <!-- El nombre visible es "Contabilidad"; el módulo, sus rutas (/tesoreria/...) y sus
+                 clases siguen llamándose Tesorería (ver 010-tesoreria.md). -->
+            <Popover>
+              <PopoverTrigger
+                class="text-muted-foreground hover:text-foreground flex items-center gap-1"
+                :class="rutaContabilidadActiva ? 'text-foreground font-medium' : undefined"
+              >
+                Contabilidad
+                <ChevronDownIcon class="size-3" />
+              </PopoverTrigger>
+              <PopoverContent align="start" class="w-44 p-1">
+                <RouterLink
+                  v-for="entrada in entradasContabilidad"
+                  :key="entrada.name"
+                  :to="{ name: entrada.name }"
+                  class="hover:bg-muted block rounded-sm px-2 py-1.5 text-sm"
+                  active-class="text-foreground font-medium"
+                >
+                  {{ entrada.etiqueta }}
+                </RouterLink>
+              </PopoverContent>
+            </Popover>
           </nav>
         </div>
         <Button variant="outline" size="sm" @click="onLogout">

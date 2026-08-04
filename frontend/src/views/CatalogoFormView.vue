@@ -25,6 +25,7 @@ const form = reactive({
   proveedor_id: null as number | null,
   nombre: '',
   descuento: '0' as string,
+  utilidad_porcentaje: '0' as string,
 })
 
 // El proveedor es fijo desde la creación del catálogo (ver 009-catalogos.md); en edición se
@@ -46,6 +47,7 @@ onMounted(async () => {
     form.proveedor_id = catalogo.proveedor_id
     form.nombre = catalogo.nombre
     form.descuento = catalogo.descuento.toString()
+    form.utilidad_porcentaje = catalogo.utilidad_porcentaje.toString()
     proveedorNombreComercial.value = catalogo.proveedor_nombre_comercial
   } catch (err) {
     errorGeneral.value = extractErrorMessage(err)
@@ -62,6 +64,7 @@ async function onSubmit() {
   const payload: CatalogoPayload = {
     nombre: form.nombre,
     descuento: form.descuento ? parseFloat(form.descuento) : 0,
+    utilidad_porcentaje: form.utilidad_porcentaje ? parseFloat(form.utilidad_porcentaje) : 0,
   }
 
   try {
@@ -70,6 +73,7 @@ async function onSubmit() {
     } else {
       await catalogos.create({ ...payload, proveedor_id: form.proveedor_id })
     }
+
     await router.push({ name: 'catalogos' })
   } catch (err) {
     erroresPorCampo.value = extractFieldErrors(err)
@@ -129,6 +133,23 @@ async function onSubmit() {
               />
               <p v-if="erroresPorCampo.descuento" class="text-destructive text-sm">
                 {{ erroresPorCampo.descuento }}
+              </p>
+            </div>
+
+            <div class="space-y-1.5">
+              <Label for="utilidad_porcentaje">Utilidad (%)</Label>
+              <Input
+                id="utilidad_porcentaje"
+                v-model="form.utilidad_porcentaje"
+                type="number"
+                min="0"
+                step="0.01"
+              />
+              <p class="text-muted-foreground text-sm">
+                Utilidad por defecto para los artículos de este catálogo.
+              </p>
+              <p v-if="erroresPorCampo.utilidad_porcentaje" class="text-destructive text-sm">
+                {{ erroresPorCampo.utilidad_porcentaje }}
               </p>
             </div>
           </CardContent>

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\EstadoCotizacion;
+use App\Enums\TipoMovimiento;
 use App\Http\Requests\Cotizaciones\CotizacionPagoRequest;
 use App\Http\Requests\Cotizaciones\EnviarCotizacionRequest;
 use App\Http\Requests\Cotizaciones\StoreCotizacionRequest;
@@ -10,7 +11,9 @@ use App\Http\Requests\Cotizaciones\UpdateCotizacionRequest;
 use App\Http\Resources\CotizacionResource;
 use App\Mail\CotizacionEnviadaMail;
 use App\Models\Cotizacion;
+use App\Models\CotizacionPago;
 use App\Services\FacturaTotalesCalculator;
+use App\Services\TesoreriaService;
 use App\Services\TwilioWhatsAppService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -31,7 +34,10 @@ class CotizacionController extends Controller
      */
     private const ZONA_HORARIA_NEGOCIO = 'America/Mexico_City';
 
-    public function __construct(private readonly TwilioWhatsAppService $whatsapp) {}
+    public function __construct(
+        private readonly TwilioWhatsAppService $whatsapp,
+        private readonly TesoreriaService $tesoreria,
+    ) {}
 
     /**
      * Display a listing of the resource. Filtros por columna combinables (cliente, RFC, folio,
@@ -93,7 +99,7 @@ class CotizacionController extends Controller
     {
         abort_unless($cotizacion->user_id === $request->user()->id, 404);
 
-        return new CotizacionResource($cotizacion->load(['cliente', 'lineas.articulo', 'pagos', 'factura']));
+        return new CotizacionResource($cotizacion->load(['cliente', 'lineas.articulo', 'pagos.cuenta', 'factura']));
     }
 
     /**
@@ -198,6 +204,10 @@ class CotizacionController extends Controller
     /**
      * Registra un pago (anticipo, saldo o pago total); si la suma acumulada alcanza o supera el
      * total, la cotización pasa a `pagada` (ver 008-cotizaciones.md, supuesto #9).
+     *
+     * El pago es la única fuente de movimientos automáticos de Tesorería: genera de inmediato un
+     * ingreso en la cuenta elegida, dentro de la misma transacción (ver 010-tesoreria.md). Crear la
+     * cotización o timbrar su factura no generan ningún movimiento.
      */
     public function pagos(CotizacionPagoRequest $request, Cotizacion $cotizacion): CotizacionResource
     {
@@ -213,20 +223,77 @@ class CotizacionController extends Controller
 
         abort_if($monto <= 0, 422, 'No hay saldo pendiente por registrar.');
 
-        DB::transaction(function () use ($cotizacion, $datos, $monto) {
-            $cotizacion->pagos()->create([
+        DB::transaction(function () use ($request, $cotizacion, $datos, $monto) {
+            $pago = $cotizacion->pagos()->create([
                 'tipo' => $datos['tipo'],
                 'fecha_pago' => $datos['fecha_pago'],
                 'monto' => $monto,
-                'forma_pago' => $datos['forma_pago'],
+                'cuenta_id' => $datos['cuenta_id'],
             ]);
+
+            $this->tesoreria->registrarDesdeDocumento(
+                $request->user(),
+                $pago,
+                (int) $datos['cuenta_id'],
+                TipoMovimiento::Ingreso,
+                $monto,
+                (string) $datos['fecha_pago'],
+                $pago->setRelation('cotizacion', $cotizacion)->conceptoMovimiento(),
+            );
 
             if ($cotizacion->fresh()->totalPagado() >= (float) $cotizacion->total) {
                 $cotizacion->update(['estado' => EstadoCotizacion::Pagada->value]);
             }
         });
 
-        return new CotizacionResource($cotizacion->fresh(['cliente', 'lineas.articulo', 'pagos']));
+        return new CotizacionResource($cotizacion->fresh(['cliente', 'lineas.articulo', 'pagos.cuenta']));
+    }
+
+    /**
+     * Elimina el pago más reciente de la cotización (criterio LIFO), única vía de corrección de un
+     * pago mal capturado — 008 no expone edición de pagos (ver 010-tesoreria.md).
+     *
+     * El criterio LIFO mantiene coherente el historial: como el monto de `saldo`/`pago_total` se
+     * autocalcula a partir de los pagos previos, eliminar un pago intermedio dejaría a los
+     * posteriores con montos que ya no corresponden al saldo pendiente que tenían al registrarse.
+     */
+    public function eliminarPago(Request $request, Cotizacion $cotizacion, CotizacionPago $pago): Response
+    {
+        abort_unless($cotizacion->user_id === $request->user()->id, 404);
+        abort_unless($pago->cotizacion_id === $cotizacion->id, 404);
+
+        abort_if(
+            $cotizacion->estado === EstadoCotizacion::ProductoEntregado,
+            422,
+            'No se pueden eliminar pagos de una cotización con producto entregado.'
+        );
+
+        $masReciente = $cotizacion->pagos()->orderByDesc('created_at')->orderByDesc('id')->first();
+
+        abort_unless(
+            $masReciente !== null && $masReciente->id === $pago->id,
+            422,
+            'Solo se puede eliminar el pago más reciente de la cotización.'
+        );
+
+        DB::transaction(function () use ($cotizacion, $pago) {
+            // Revierte el movimiento en Tesorería y recalcula el saldo de la cuenta afectada.
+            $movimiento = $pago->movimiento;
+            if ($movimiento !== null) {
+                $this->tesoreria->eliminar($movimiento);
+            }
+
+            $pago->delete();
+
+            // Revierte la transición automática de 008: si ya no alcanza el total, la cotización
+            // deja de estar pagada.
+            if ($cotizacion->estado === EstadoCotizacion::Pagada
+                && $cotizacion->fresh()->totalPagado() < (float) $cotizacion->total) {
+                $cotizacion->update(['estado' => EstadoCotizacion::Enviada->value]);
+            }
+        });
+
+        return response()->noContent();
     }
 
     /**
@@ -239,7 +306,7 @@ class CotizacionController extends Controller
 
         $cotizacion->update(['estado' => EstadoCotizacion::ProductoEntregado->value]);
 
-        return new CotizacionResource($cotizacion->fresh(['cliente', 'lineas.articulo', 'pagos']));
+        return new CotizacionResource($cotizacion->fresh(['cliente', 'lineas.articulo', 'pagos.cuenta']));
     }
 
     /**

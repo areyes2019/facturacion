@@ -33,38 +33,65 @@ const form = reactive({
   clave_prod_serv: null as string | null,
   clave_unidad: null as string | null,
   objeto_imp: null as string | null,
-  precio_unitario_sin_iva: '' as string,
+  precio_proveedor: '' as string,
+  utilidad_porcentaje: '' as string,
 })
 
-const precioConIva = computed(() => {
-  const precio = parseFloat(form.precio_unitario_sin_iva)
-  return Number.isFinite(precio) ? (precio * 1.16).toFixed(2) : '0.00'
-})
-
-// Descuento del catálogo seleccionado, para mostrar el precio con descuento en vivo (ver
-// 009-catalogos.md); se consulta cada vez que cambia el catálogo porque el combobox solo expone
-// id/nombre, no el descuento.
+// Descuento y utilidad del catálogo seleccionado, para mostrar los precios en vivo (ver
+// 009-catalogos.md y 011-precio-proveedor-utilidad.md); se consultan cada vez que cambia el
+// catálogo porque el combobox solo expone id/nombre, no el descuento ni la utilidad.
 const descuentoCatalogo = ref(0)
+const utilidadCatalogo = ref(0)
 watch(
   () => form.catalogo_id,
   async (catalogoId) => {
     if (!catalogoId) {
       descuentoCatalogo.value = 0
+      utilidadCatalogo.value = 0
       return
     }
     try {
       const catalogo = await catalogos.fetchOne(catalogoId)
       descuentoCatalogo.value = catalogo.descuento
+      utilidadCatalogo.value = catalogo.utilidad_porcentaje
     } catch {
       descuentoCatalogo.value = 0
+      utilidadCatalogo.value = 0
     }
   },
 )
 
-const precioConDescuento = computed(() => {
-  const precio = parseFloat(form.precio_unitario_sin_iva)
+// Utilidad efectiva: la del artículo si se capturó, si no la del catálogo.
+const utilidadEfectiva = computed(() => {
+  const utilidad = parseFloat(form.utilidad_porcentaje)
+  if (Number.isFinite(utilidad)) return utilidad
+  return utilidadCatalogo.value
+})
+
+// Costo con descuento del catálogo aplicado al precio de proveedor.
+const costoConDescuento = computed(() => {
+  const precio = parseFloat(form.precio_proveedor)
   if (!Number.isFinite(precio)) return '0.00'
   return (precio * (1 - descuentoCatalogo.value / 100)).toFixed(2)
+})
+
+// Precio unitario sin IVA = costo con descuento + utilidad.
+const precioUnitarioSinIva = computed(() => {
+  const costo = parseFloat(costoConDescuento.value)
+  if (!Number.isFinite(costo)) return '0.00'
+  return (costo * (1 + utilidadEfectiva.value / 100)).toFixed(2)
+})
+
+const precioConIva = computed(() => {
+  const precio = parseFloat(precioUnitarioSinIva.value)
+  return Number.isFinite(precio) ? (precio * 1.16).toFixed(2) : '0.00'
+})
+
+const utilidadMonto = computed(() => {
+  const costo = parseFloat(costoConDescuento.value)
+  const precio = parseFloat(precioUnitarioSinIva.value)
+  if (!Number.isFinite(costo) || !Number.isFinite(precio)) return '0.00'
+  return (precio - costo).toFixed(2)
 })
 
 const cargando = ref(false)
@@ -84,7 +111,9 @@ onMounted(async () => {
     form.clave_prod_serv = articulo.clave_prod_serv
     form.clave_unidad = articulo.clave_unidad
     form.objeto_imp = articulo.objeto_imp
-    form.precio_unitario_sin_iva = articulo.precio_unitario_sin_iva.toString()
+    form.precio_proveedor = articulo.precio_proveedor.toString()
+    form.utilidad_porcentaje =
+      articulo.utilidad_porcentaje !== null ? articulo.utilidad_porcentaje.toString() : ''
   } catch (err) {
     errorGeneral.value = extractErrorMessage(err)
   } finally {
@@ -104,9 +133,8 @@ async function onSubmit() {
     clave_prod_serv: form.clave_prod_serv,
     clave_unidad: form.clave_unidad,
     objeto_imp: form.objeto_imp,
-    precio_unitario_sin_iva: form.precio_unitario_sin_iva
-      ? parseFloat(form.precio_unitario_sin_iva)
-      : null,
+    precio_proveedor: form.precio_proveedor ? parseFloat(form.precio_proveedor) : null,
+    utilidad_porcentaje: form.utilidad_porcentaje ? parseFloat(form.utilidad_porcentaje) : null,
   }
 
   try {
@@ -115,6 +143,7 @@ async function onSubmit() {
     } else {
       await articulos.create(payload)
     }
+
     await router.push({ name: 'articulos' })
   } catch (err) {
     erroresPorCampo.value = extractFieldErrors(err)
@@ -191,25 +220,51 @@ async function onSubmit() {
             </div>
 
             <div class="space-y-1.5">
-              <Label for="precio_unitario_sin_iva">Precio unitario sin IVA (MXN)</Label>
+              <Label for="precio_proveedor">Precio de proveedor (MXN)</Label>
               <Input
-                id="precio_unitario_sin_iva"
-                v-model="form.precio_unitario_sin_iva"
+                id="precio_proveedor"
+                v-model="form.precio_proveedor"
                 type="number"
                 min="0.01"
                 step="0.01"
                 required
               />
               <p class="text-muted-foreground text-sm">
-                Precio con IVA (16%, solo referencia): ${{ precioConIva }}
-              </p>
-              <p class="text-muted-foreground text-sm">
-                Precio con descuento del catálogo ({{ descuentoCatalogo }}%, solo referencia): ${{
-                  precioConDescuento
+                Costo con descuento del catálogo ({{ descuentoCatalogo }}%): ${{
+                  costoConDescuento
                 }}
               </p>
-              <p v-if="erroresPorCampo.precio_unitario_sin_iva" class="text-destructive text-sm">
-                {{ erroresPorCampo.precio_unitario_sin_iva }}
+              <p v-if="erroresPorCampo.precio_proveedor" class="text-destructive text-sm">
+                {{ erroresPorCampo.precio_proveedor }}
+              </p>
+            </div>
+
+            <div class="space-y-1.5">
+              <Label for="utilidad_porcentaje">Utilidad (%)</Label>
+              <Input
+                id="utilidad_porcentaje"
+                v-model="form.utilidad_porcentaje"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Usa la utilidad del catálogo"
+              />
+              <p class="text-muted-foreground text-sm">
+                Si se deja vacío se usa la utilidad del catálogo ({{ utilidadCatalogo }}%).
+              </p>
+              <p v-if="erroresPorCampo.utilidad_porcentaje" class="text-destructive text-sm">
+                {{ erroresPorCampo.utilidad_porcentaje }}
+              </p>
+            </div>
+
+            <div class="space-y-1.5">
+              <Label>Precio unitario sin IVA (MXN)</Label>
+              <Input :model-value="precioUnitarioSinIva" disabled />
+              <p class="text-muted-foreground text-sm">
+                Utilidad: ${{ utilidadMonto }} ({{ utilidadEfectiva }}%)
+              </p>
+              <p class="text-muted-foreground text-sm">
+                Precio con IVA (16%, solo referencia): ${{ precioConIva }}
               </p>
             </div>
           </CardContent>

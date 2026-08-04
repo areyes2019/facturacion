@@ -13,9 +13,13 @@ export interface Articulo {
   clave_prod_serv: string
   clave_unidad: string
   objeto_imp: string
+  precio_proveedor: number
+  utilidad_porcentaje: number | null
+  utilidad_porcentaje_efectivo: number | null
+  costo_con_descuento: number
   precio_unitario_sin_iva: number
   precio_unitario_con_iva: number
-  precio_con_descuento: number
+  utilidad: number
   created_at: string
   updated_at: string
 }
@@ -27,7 +31,8 @@ export interface ArticuloPayload {
   clave_prod_serv: string | null
   clave_unidad: string | null
   objeto_imp: string | null
-  precio_unitario_sin_iva: number | null
+  precio_proveedor: number | null
+  utilidad_porcentaje: number | null
 }
 
 export interface ImportarCsvReporte {

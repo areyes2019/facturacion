@@ -156,6 +156,38 @@ const router = createRouter({
       component: () => import('../views/CotizacionDetalleView.vue'),
       meta: { requiresAuth: true },
     },
+    // Tesorería: el nombre técnico del módulo y sus rutas siguen siendo "tesoreria"; solo la
+    // etiqueta del menú dice "Contabilidad" (ver 010-tesoreria.md).
+    {
+      path: '/tesoreria/cuentas',
+      name: 'cuentas',
+      component: () => import('../views/CuentasListView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/tesoreria/cuentas/crear',
+      name: 'cuentas-crear',
+      component: () => import('../views/CuentaFormView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/tesoreria/cuentas/:id/editar',
+      name: 'cuentas-editar',
+      component: () => import('../views/CuentaFormView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/tesoreria/movimientos',
+      name: 'movimientos',
+      component: () => import('../views/MovimientosListView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/tesoreria/saldos',
+      name: 'saldos',
+      component: () => import('../views/SaldosView.vue'),
+      meta: { requiresAuth: true },
+    },
     ...(import.meta.env.DEV
       ? [
           {

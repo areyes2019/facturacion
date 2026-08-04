@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\ObjetoImpuesto;
+use App\Services\PrecioArticuloCalculator;
 use Database\Factories\ArticuloFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -18,8 +19,10 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'clave_prod_serv',
     'clave_unidad',
     'objeto_imp',
+    'precio_proveedor',
+    'utilidad_porcentaje',
+    'costo_con_descuento',
     'precio_unitario_sin_iva',
-    'precio_con_descuento',
 ])]
 class Articulo extends Model
 {
@@ -50,14 +53,30 @@ class Articulo extends Model
     }
 
     /**
+     * Utilidad en pesos por unidad (sin IVA): precio de venta − costo con descuento. No se
+     * persiste; es una resta de dos columnas (ver 011-precio-proveedor-utilidad.md).
+     */
+    protected function utilidad(): Attribute
+    {
+        return Attribute::make(
+            get: fn (): float => PrecioArticuloCalculator::utilidad(
+                (float) $this->precio_unitario_sin_iva,
+                (float) $this->costo_con_descuento,
+            ),
+        );
+    }
+
+    /**
      * @return array<string, string>
      */
     protected function casts(): array
     {
         return [
             'objeto_imp' => ObjetoImpuesto::class,
+            'precio_proveedor' => 'decimal:2',
+            'utilidad_porcentaje' => 'decimal:2',
+            'costo_con_descuento' => 'decimal:2',
             'precio_unitario_sin_iva' => 'decimal:2',
-            'precio_con_descuento' => 'decimal:2',
         ];
     }
 }

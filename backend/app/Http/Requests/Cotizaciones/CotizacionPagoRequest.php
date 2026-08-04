@@ -4,7 +4,7 @@ namespace App\Http\Requests\Cotizaciones;
 
 use App\Enums\TipoPagoCotizacion;
 use App\Models\Cotizacion;
-use App\Rules\FormaPagoValido;
+use App\Rules\CuentaActivaDelUsuario;
 use Closure;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -46,7 +46,10 @@ class CotizacionPagoRequest extends FormRequest
                 'decimal:0,2',
                 $this->sinSobrepago($cotizacion),
             ],
-            'forma_pago' => ['required', 'string', new FormaPagoValido],
+            // Reemplaza a la antigua regla de `forma_pago` (catálogo SAT): el pago de una
+            // cotización entra a una cuenta de Tesorería, y esa cuenta debe estar activa porque
+            // el pago genera un movimiento automático (ver 010-tesoreria.md).
+            'cuenta_id' => ['required', 'integer', new CuentaActivaDelUsuario($this->user()->id)],
         ];
     }
 
