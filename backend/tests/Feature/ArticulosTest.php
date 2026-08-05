@@ -48,7 +48,7 @@ test('un usuario autenticado puede crear un articulo ligado a uno de sus catalog
     ]);
 });
 
-test('un articulo con porcentaje de utilidad propio calcula su precio de venta con margen sobre venta', function () {
+test('un articulo con porcentaje de utilidad propio calcula su precio de venta con markup sobre el costo', function () {
     $user = User::factory()->create();
     $catalogo = Catalogo::factory()->for($user)->create(['descuento' => 0, 'utilidad_porcentaje' => 0]);
 
@@ -59,10 +59,10 @@ test('un articulo con porcentaje de utilidad propio calcula su precio de venta c
     ]));
 
     $response->assertCreated();
-    // costo = 210; precio = techo(210 / (1 - 0.30)) = techo(300.00000000000006) = 300.00
+    // costo = 210; precio = techo(210 * 1.30) = 273.00
     $response->assertJsonPath('data.costo_con_descuento', 210);
-    $response->assertJsonPath('data.precio_unitario_sin_iva', 300);
-    $response->assertJsonPath('data.utilidad', 90);
+    $response->assertJsonPath('data.precio_unitario_sin_iva', 273);
+    $response->assertJsonPath('data.utilidad', 63);
     $response->assertJsonPath('data.utilidad_porcentaje_efectivo', 30);
 });
 
@@ -140,17 +140,33 @@ test('un precio de proveedor menor o igual a cero no permite crear el articulo',
     $response->assertJsonValidationErrors('precio_proveedor');
 });
 
-test('un porcentaje de utilidad fuera de rango no permite crear el articulo', function () {
+test('un porcentaje de utilidad fuera de rango no permite crear el articulo', function (float $porcentaje) {
     $user = User::factory()->create();
     $catalogo = Catalogo::factory()->for($user)->create();
 
     $response = $this->actingAs($user)->postJson('/api/v1/articulos', datosArticuloValidos([
         'catalogo_id' => $catalogo->id,
-        'utilidad_porcentaje' => 100,
+        'utilidad_porcentaje' => $porcentaje,
     ]));
 
     $response->assertUnprocessable();
     $response->assertJsonValidationErrors('utilidad_porcentaje');
+})->with([-1, 1000, 1000.01]);
+
+test('un porcentaje de utilidad de tres digitos es valido', function () {
+    $user = User::factory()->create();
+    $catalogo = Catalogo::factory()->for($user)->create(['descuento' => 0, 'utilidad_porcentaje' => 0]);
+
+    $response = $this->actingAs($user)->postJson('/api/v1/articulos', datosArticuloValidos([
+        'catalogo_id' => $catalogo->id,
+        'precio_proveedor' => 50,
+        'utilidad_porcentaje' => 300,
+    ]));
+
+    $response->assertCreated();
+    // El markup no tiene singularidad matemática: 50 * 4 = 200 (ver 011).
+    $response->assertJsonPath('data.precio_unitario_sin_iva', 200);
+    $response->assertJsonPath('data.utilidad', 150);
 });
 
 test('un nombre duplicado en el mismo catalogo es rechazado', function () {
@@ -380,6 +396,145 @@ test('exportar articulos genera un csv con las columnas esperadas por la importa
 
     $response->assertOk();
     $contenido = $response->streamedContent();
-    expect($contenido)->toContain('nombre,modelo,clave_prod_serv,clave_unidad,objeto_imp,precio_proveedor');
+    expect($contenido)->toContain('nombre,modelo,clave_prod_serv,clave_unidad,objeto_imp,precio_proveedor,utilidad_porcentaje');
     expect($contenido)->toContain('Laptop 14 pulgadas');
+});
+
+test('importar un csv respeta el porcentaje de utilidad por fila y hereda cuando la celda va vacia', function () {
+    $user = User::factory()->create();
+    $catalogo = Catalogo::factory()->for($user)->create(['descuento' => 0, 'utilidad_porcentaje' => 10]);
+
+    $csv = "nombre,modelo,clave_prod_serv,clave_unidad,objeto_imp,precio_proveedor,utilidad_porcentaje\n"
+        ."Con porcentaje propio,MOD-1,43211503,H87,02,100.00,25\n"
+        ."Hereda del catalogo,MOD-2,43211503,H87,02,100.00,\n";
+    $archivo = UploadedFile::fake()->createWithContent('articulos.csv', $csv);
+
+    $response = $this->actingAs($user)->postJson("/api/v1/catalogos-proveedor/{$catalogo->id}/articulos/importar-csv", [
+        'archivo' => $archivo,
+    ]);
+
+    $response->assertOk();
+    $response->assertJsonPath('importados', 2);
+    $response->assertJsonPath('errores', []);
+    // Porcentaje propio: 100 * 1.25 = 125.
+    $this->assertDatabaseHas('articulos', [
+        'nombre' => 'Con porcentaje propio',
+        'utilidad_porcentaje' => 25,
+        'precio_unitario_sin_iva' => 125,
+    ]);
+    // Celda vacía: hereda el 10% del catálogo y queda con utilidad_porcentaje en NULL.
+    $this->assertDatabaseHas('articulos', [
+        'nombre' => 'Hereda del catalogo',
+        'utilidad_porcentaje' => null,
+        'precio_unitario_sin_iva' => 110,
+    ]);
+});
+
+test('importar un csv rechaza por fila un porcentaje de utilidad fuera de rango', function () {
+    $user = User::factory()->create();
+    $catalogo = Catalogo::factory()->for($user)->create();
+
+    $csv = "nombre,modelo,clave_prod_serv,clave_unidad,objeto_imp,precio_proveedor,utilidad_porcentaje\n"
+        ."Articulo valido,MOD-1,43211503,H87,02,100.00,25\n"
+        ."Porcentaje imposible,MOD-2,43211503,H87,02,100.00,1000\n";
+    $archivo = UploadedFile::fake()->createWithContent('articulos.csv', $csv);
+
+    $response = $this->actingAs($user)->postJson("/api/v1/catalogos-proveedor/{$catalogo->id}/articulos/importar-csv", [
+        'archivo' => $archivo,
+    ]);
+
+    $response->assertOk();
+    $response->assertJsonPath('importados', 1);
+    expect($response->json('errores.0.fila'))->toBe(3);
+    $this->assertDatabaseMissing('articulos', ['nombre' => 'Porcentaje imposible']);
+});
+
+test('un csv exportado conserva el porcentaje propio y la herencia al reimportarse', function () {
+    $user = User::factory()->create();
+    $catalogo = Catalogo::factory()->for($user)->create(['descuento' => 0, 'utilidad_porcentaje' => 10]);
+    Articulo::factory()->for($user)->for($catalogo)->create([
+        'nombre' => 'Con porcentaje propio',
+        'precio_proveedor' => 100,
+        'utilidad_porcentaje' => 25,
+        'costo_con_descuento' => 100,
+        'precio_unitario_sin_iva' => 125,
+    ]);
+    Articulo::factory()->for($user)->for($catalogo)->create([
+        'nombre' => 'Hereda del catalogo',
+        'precio_proveedor' => 100,
+        'utilidad_porcentaje' => null,
+        'costo_con_descuento' => 100,
+        'precio_unitario_sin_iva' => 110,
+    ]);
+
+    $contenido = $this->actingAs($user)->get('/api/v1/articulos/exportar-csv')->streamedContent();
+
+    // El archivo exportado se reimporta en un catálogo nuevo sin perder la distinción entre
+    // porcentaje propio y herencia.
+    $destino = Catalogo::factory()->for($user)->create(['descuento' => 0, 'utilidad_porcentaje' => 10]);
+    $archivo = UploadedFile::fake()->createWithContent('articulos.csv', $contenido);
+
+    $response = $this->actingAs($user)->postJson("/api/v1/catalogos-proveedor/{$destino->id}/articulos/importar-csv", [
+        'archivo' => $archivo,
+    ]);
+
+    $response->assertOk();
+    $response->assertJsonPath('importados', 2);
+    $this->assertDatabaseHas('articulos', [
+        'catalogo_id' => $destino->id,
+        'nombre' => 'Con porcentaje propio',
+        'utilidad_porcentaje' => 25,
+        'precio_unitario_sin_iva' => 125,
+    ]);
+    $this->assertDatabaseHas('articulos', [
+        'catalogo_id' => $destino->id,
+        'nombre' => 'Hereda del catalogo',
+        'utilidad_porcentaje' => null,
+        'precio_unitario_sin_iva' => 110,
+    ]);
+});
+
+test('el listado ordena por las columnas numericas en ambas direcciones', function (string $sort, array $ascendente) {
+    $user = User::factory()->create();
+    $catalogo = Catalogo::factory()->for($user)->create(['descuento' => 0, 'utilidad_porcentaje' => 0]);
+
+    // Barato: costo 100, venta 110, utilidad 10.
+    Articulo::factory()->for($user)->for($catalogo)->create([
+        'nombre' => 'Barato', 'precio_proveedor' => 100, 'utilidad_porcentaje' => 10,
+        'costo_con_descuento' => 100, 'precio_unitario_sin_iva' => 110,
+    ]);
+    // Caro: costo 200, venta 220, utilidad 20.
+    Articulo::factory()->for($user)->for($catalogo)->create([
+        'nombre' => 'Caro', 'precio_proveedor' => 200, 'utilidad_porcentaje' => 10,
+        'costo_con_descuento' => 200, 'precio_unitario_sin_iva' => 220,
+    ]);
+    // Rentable: costo 150, venta 300, utilidad 150.
+    Articulo::factory()->for($user)->for($catalogo)->create([
+        'nombre' => 'Rentable', 'precio_proveedor' => 150, 'utilidad_porcentaje' => 100,
+        'costo_con_descuento' => 150, 'precio_unitario_sin_iva' => 300,
+    ]);
+
+    $asc = $this->actingAs($user)->getJson("/api/v1/articulos?sort=$sort&direction=asc");
+    $asc->assertOk();
+    expect(collect($asc->json('data'))->pluck('nombre')->all())->toBe($ascendente);
+
+    $desc = $this->actingAs($user)->getJson("/api/v1/articulos?sort=$sort&direction=desc");
+    $desc->assertOk();
+    expect(collect($desc->json('data'))->pluck('nombre')->all())->toBe(array_reverse($ascendente));
+})->with([
+    'costo con descuento' => ['costo_con_descuento', ['Barato', 'Rentable', 'Caro']],
+    'precio de venta' => ['precio_unitario_sin_iva', ['Barato', 'Caro', 'Rentable']],
+    'utilidad' => ['utilidad', ['Barato', 'Caro', 'Rentable']],
+]);
+
+test('un sort no reconocido se ignora y el listado cae al orden por nombre', function () {
+    $user = User::factory()->create();
+    $catalogo = Catalogo::factory()->for($user)->create();
+    Articulo::factory()->for($user)->for($catalogo)->create(['nombre' => 'Zeta']);
+    Articulo::factory()->for($user)->for($catalogo)->create(['nombre' => 'Alfa']);
+
+    $response = $this->actingAs($user)->getJson('/api/v1/articulos?sort=precio_secreto&direction=desc');
+
+    $response->assertOk();
+    expect(collect($response->json('data'))->pluck('nombre')->all())->toBe(['Alfa', 'Zeta']);
 });

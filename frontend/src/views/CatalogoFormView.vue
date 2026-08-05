@@ -28,6 +28,12 @@ const form = reactive({
   utilidad_porcentaje: '0' as string,
 })
 
+// Aviso no bloqueante por encima del 200% (ver 011-precio-proveedor-utilidad.md): a partir de ahí
+// es más probable un dedazo que un markup real, pero el markup alto es legítimo y sí se guarda.
+const UMBRAL_PORCENTAJE_ALTO = 200
+const porcentajeAlto = computed(() => parseFloat(form.utilidad_porcentaje) > UMBRAL_PORCENTAJE_ALTO)
+const multiplicador = computed(() => (1 + parseFloat(form.utilidad_porcentaje) / 100).toFixed(2))
+
 // El proveedor es fijo desde la creación del catálogo (ver 009-catalogos.md); en edición se
 // muestra de solo lectura, con el nombre comercial ya conocido para no depender de que
 // ProveedorSelect haya terminado de cargar sus opciones.
@@ -143,10 +149,15 @@ async function onSubmit() {
                 v-model="form.utilidad_porcentaje"
                 type="number"
                 min="0"
+                max="999.99"
                 step="0.01"
               />
               <p class="text-muted-foreground text-sm">
                 Utilidad por defecto para los artículos de este catálogo.
+              </p>
+              <p v-if="porcentajeAlto" class="text-sm text-amber-600 dark:text-amber-500">
+                Una utilidad del {{ form.utilidad_porcentaje }}% multiplica el costo por
+                {{ multiplicador }}. Verifica que sea el valor que querías.
               </p>
               <p v-if="erroresPorCampo.utilidad_porcentaje" class="text-destructive text-sm">
                 {{ erroresPorCampo.utilidad_porcentaje }}

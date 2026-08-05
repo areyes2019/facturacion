@@ -11,10 +11,14 @@ use App\Models\Catalogo;
  *   precio_proveedor          (capturado)              $200.00
  *     ↓ × (1 − descuento / 100)                        descuento del catálogo
  *   costo_con_descuento       (calculado, persistido)  $180.00
- *     ↓ ÷ (1 − utilidad_efectiva / 100)                margen sobre venta
- *   precio_unitario_sin_iva   (calculado, persistido)  $240.00
+ *     ↓ × (1 + utilidad_efectiva / 100)                markup sobre el costo
+ *   precio_unitario_sin_iva   (calculado, persistido)  $225.00
  *
- * El porcentaje se interpreta como margen sobre la venta, no como recargo sobre el costo.
+ * El porcentaje se interpreta como markup sobre el costo: un 25% significa "quiero ganar el 25% de
+ * lo que me costó", de ahí la multiplicación.
+ *
+ * Los casos frontera de esta cadena viven en shared/fixtures/precios-articulos.json, compartidos
+ * con la implementación espejo en TypeScript (frontend/src/lib/precioArticulo.ts).
  */
 class PrecioArticuloCalculator
 {
@@ -27,16 +31,23 @@ class PrecioArticuloCalculator
     }
 
     /**
-     * Techo a 2 decimales que absorbe primero el error de representación en punto flotante.
+     * Techo a 2 decimales, redondeando DESPUÉS de escalar a centavos.
      *
-     * La división costo ÷ (1 − % / 100) produce error de representación: con costo $210.00 y 30%
-     * de utilidad el resultado correcto es exactamente $300.00, pero 210 / 0.7 da
-     * 300.00000000000006, que un techo ingenuo convertiría en $300.01. Se redondea primero a 4
-     * decimales y se aplica el techo sobre ese valor (ver 011).
+     * El orden es la parte sustancial de la definición y no es intercambiable:
+     *
+     *   - `ceil($valor * 100) / 100` falla porque el producto costo × (1 + % / 100) arrastra error
+     *     de representación en punto flotante.
+     *   - `ceil(round($valor, 4) * 100) / 100` tampoco sirve: corrige el valor pero vuelve a
+     *     introducir error en la multiplicación por 100 (0.07 * 100 = 7.000000000000001), y termina
+     *     cobrando un centavo de más. Con costo $15.40 y 5% el resultado exacto es $16.17 y esa
+     *     variante devuelve $16.18.
+     *   - Redondear a 6 decimales sobre el valor ya expresado en centavos elimina ambas fuentes de
+     *     error. Verificado contra aritmética entera de centavos sobre 4.2 millones de
+     *     combinaciones, sin desviaciones (ver 011).
      */
     public static function techo2(float $valor): float
     {
-        return ceil(round($valor, 4) * 100) / 100;
+        return ceil(round($valor * 100, 6)) / 100;
     }
 
     /**
@@ -48,11 +59,11 @@ class PrecioArticuloCalculator
     }
 
     /**
-     * Precio de venta sin IVA = techo2(costo_con_descuento ÷ (1 − utilidad_efectiva / 100)).
+     * Precio de venta sin IVA = techo2(costo_con_descuento × (1 + utilidad_efectiva / 100)).
      */
     public static function precioVentaSinIva(float $costoConDescuento, float $utilidadPorcentaje): float
     {
-        return self::techo2($costoConDescuento / (1 - $utilidadPorcentaje / 100));
+        return self::techo2($costoConDescuento * (1 + $utilidadPorcentaje / 100));
     }
 
     /**

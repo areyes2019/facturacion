@@ -87,18 +87,18 @@ test('un descuento fuera del rango 0 a 100 no permite crear el catalogo', functi
     $response->assertJsonValidationErrors('descuento');
 });
 
-test('un porcentaje de utilidad fuera de rango no permite crear el catalogo', function () {
+test('un porcentaje de utilidad fuera de rango no permite crear el catalogo', function (float $porcentaje) {
     $user = User::factory()->create();
     $proveedor = Proveedor::factory()->for($user)->create();
 
     $response = $this->actingAs($user)->postJson('/api/v1/catalogos-proveedor', datosCatalogoValidos([
         'proveedor_id' => $proveedor->id,
-        'utilidad_porcentaje' => 100,
+        'utilidad_porcentaje' => $porcentaje,
     ]));
 
     $response->assertUnprocessable();
     $response->assertJsonValidationErrors('utilidad_porcentaje');
-});
+})->with([-1, 1000, 1000.01]);
 
 test('un nombre de catalogo duplicado en el mismo proveedor es rechazado', function () {
     $user = User::factory()->create();
@@ -224,8 +224,8 @@ test('editar la utilidad de un catalogo recalcula el precio de venta de los arti
     $propio = Articulo::factory()->for($user)->for($catalogo)->create([
         'precio_proveedor' => 210,
         'costo_con_descuento' => 210,
-        'precio_unitario_sin_iva' => 300,
-        'utilidad_porcentaje' => 30,
+        'precio_unitario_sin_iva' => 252,
+        'utilidad_porcentaje' => 20,
     ]);
 
     $response = $this->actingAs($user)->putJson("/api/v1/catalogos-proveedor/{$catalogo->id}", [
@@ -235,10 +235,10 @@ test('editar la utilidad de un catalogo recalcula el precio de venta de los arti
     ]);
 
     $response->assertOk();
-    // El que hereda pasa de 210 a techo(210 / 0.70) = 300.
-    $this->assertDatabaseHas('articulos', ['id' => $hereda->id, 'precio_unitario_sin_iva' => 300]);
-    // El que tiene porcentaje propio conserva su precio.
-    $this->assertDatabaseHas('articulos', ['id' => $propio->id, 'precio_unitario_sin_iva' => 300]);
+    // El que hereda pasa de 210 a techo(210 * 1.30) = 273.
+    $this->assertDatabaseHas('articulos', ['id' => $hereda->id, 'precio_unitario_sin_iva' => 273]);
+    // El que tiene porcentaje propio conserva su precio, calculado con su propio 20%.
+    $this->assertDatabaseHas('articulos', ['id' => $propio->id, 'precio_unitario_sin_iva' => 252]);
 });
 
 test('el endpoint de impacto de precios devuelve la vista previa sin persistir', function () {

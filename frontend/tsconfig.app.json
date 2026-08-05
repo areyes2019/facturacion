@@ -14,5 +14,7 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue"],
+  // Los tests corren en Node y usan sus APIs; se verifican con tsconfig.vitest.json.
+  "exclude": ["src/**/*.test.ts"]
 }

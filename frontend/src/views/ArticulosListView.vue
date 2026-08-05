@@ -7,8 +7,15 @@ import {
   TrashIcon,
   ArrowUpTrayIcon,
   ArrowDownTrayIcon,
+  ChevronUpIcon,
+  ChevronDownIcon,
 } from '@heroicons/vue/24/outline'
-import { useArticulosStore, type Articulo, type ImportarCsvReporte } from '../stores/articulos'
+import {
+  useArticulosStore,
+  type Articulo,
+  type ArticuloSort,
+  type ImportarCsvReporte,
+} from '../stores/articulos'
 import { extractErrorMessage } from '../lib/errors'
 import AppLayout from '../layouts/AppLayout.vue'
 import CatalogoSelect from '../components/CatalogoSelect.vue'
@@ -56,6 +63,17 @@ let buscarTimeout: ReturnType<typeof setTimeout>
 function onBuscar() {
   clearTimeout(buscarTimeout)
   buscarTimeout = setTimeout(() => articulos.fetchList(1), 300)
+}
+
+/** Columnas numéricas ordenables del listado (ver 011-precio-proveedor-utilidad.md). */
+const columnasOrdenables: { clave: ArticuloSort; etiqueta: string }[] = [
+  { clave: 'costo_con_descuento', etiqueta: 'Costo con descuento' },
+  { clave: 'precio_unitario_sin_iva', etiqueta: 'Precio de venta' },
+  { clave: 'utilidad', etiqueta: 'Utilidad' },
+]
+
+function pesos(valor: number): string {
+  return valor.toFixed(2)
 }
 
 function irAPagina(pagina: number) {
@@ -180,24 +198,53 @@ async function confirmarImportar() {
               <TableRow>
                 <TableHead>Nombre</TableHead>
                 <TableHead>Modelo</TableHead>
-                <TableHead>Proveedor</TableHead>
-                <TableHead>Precio con IVA</TableHead>
+                <TableHead>Catálogo</TableHead>
+                <TableHead v-for="columna in columnasOrdenables" :key="columna.clave">
+                  <button
+                    type="button"
+                    class="hover:text-foreground -mx-1 flex items-center gap-1 rounded px-1 py-0.5"
+                    :aria-sort="
+                      articulos.sort === columna.clave
+                        ? articulos.direction === 'asc'
+                          ? 'ascending'
+                          : 'descending'
+                        : 'none'
+                    "
+                    @click="articulos.toggleSort(columna.clave)"
+                  >
+                    {{ columna.etiqueta }}
+                    <ChevronUpIcon
+                      v-if="articulos.sort === columna.clave && articulos.direction === 'asc'"
+                      class="size-3.5"
+                    />
+                    <ChevronDownIcon
+                      v-else-if="articulos.sort === columna.clave"
+                      class="size-3.5"
+                    />
+                  </button>
+                </TableHead>
                 <TableHead class="text-right">Acciones</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               <TableRow v-if="!articulos.loading && articulos.items.length === 0">
-                <TableCell colspan="5" class="text-muted-foreground py-10 text-center">
+                <TableCell colspan="7" class="text-muted-foreground py-10 text-center">
                   No hay artículos registrados todavía.
                 </TableCell>
               </TableRow>
               <TableRow v-for="articulo in articulos.items" :key="articulo.id">
                 <TableCell>{{ articulo.nombre }}</TableCell>
                 <TableCell>{{ articulo.modelo }}</TableCell>
-                <TableCell truncate :title="articulo.proveedor_nombre_comercial ?? undefined">
-                  {{ articulo.proveedor_nombre_comercial ?? '—' }}
+                <TableCell truncate :title="articulo.catalogo_nombre ?? undefined">
+                  {{ articulo.catalogo_nombre ?? '—' }}
                 </TableCell>
-                <TableCell>${{ articulo.precio_unitario_con_iva.toFixed(2) }}</TableCell>
+                <TableCell class="tabular-nums">
+                  ${{ pesos(articulo.costo_con_descuento) }}
+                </TableCell>
+                <TableCell class="tabular-nums">
+                  ${{ pesos(articulo.precio_unitario_sin_iva) }}
+                </TableCell>
+                <TableCell class="tabular-nums">${{ pesos(articulo.utilidad) }}</TableCell>
                 <TableCell class="flex justify-end gap-2 text-right">
                   <Button as-child variant="outline" size="icon-sm">
                     <RouterLink :to="{ name: 'articulos-editar', params: { id: articulo.id } }">
@@ -275,8 +322,13 @@ async function confirmarImportar() {
             <code
               class="bg-muted block w-full min-w-0 overflow-x-auto rounded-md px-3 py-2 text-xs whitespace-nowrap"
             >
-              nombre,modelo,clave_prod_serv,clave_unidad,objeto_imp,precio_unitario_sin_iva
+              nombre,modelo,clave_prod_serv,clave_unidad,objeto_imp,precio_proveedor,utilidad_porcentaje
             </code>
+
+            <p class="text-muted-foreground text-sm">
+              La columna <code>utilidad_porcentaje</code> es opcional: si la celda va vacía, el
+              artículo hereda el porcentaje de utilidad del catálogo seleccionado.
+            </p>
 
             <div class="space-y-1.5">
               <Label>Catálogo</Label>

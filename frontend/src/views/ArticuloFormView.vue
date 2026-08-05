@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useArticulosStore, type ArticuloPayload } from '../stores/articulos'
+import { useArticulosStore, type Articulo, type ArticuloPayload } from '../stores/articulos'
 import { useCatalogosStore } from '../stores/catalogos'
 import { extractErrorMessage, extractFieldErrors } from '../lib/errors'
+import { calcularCadena, precioConIva, redondeo2 } from '../lib/precioArticulo'
 import { Button } from '../components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Input } from '../components/ui/input'
@@ -68,36 +69,39 @@ const utilidadEfectiva = computed(() => {
   return utilidadCatalogo.value
 })
 
-// Costo con descuento del catálogo aplicado al precio de proveedor.
-const costoConDescuento = computed(() => {
+const precioProveedor = computed(() => {
   const precio = parseFloat(form.precio_proveedor)
-  if (!Number.isFinite(precio)) return '0.00'
-  return (precio * (1 - descuentoCatalogo.value / 100)).toFixed(2)
+  return Number.isFinite(precio) ? precio : 0
 })
 
-// Precio unitario sin IVA = costo con descuento + utilidad.
-const precioUnitarioSinIva = computed(() => {
-  const costo = parseFloat(costoConDescuento.value)
-  if (!Number.isFinite(costo)) return '0.00'
-  return (costo * (1 + utilidadEfectiva.value / 100)).toFixed(2)
-})
+// Cadena completa calculada con el mismo módulo que espeja al backend (ver
+// 011-precio-proveedor-utilidad.md). Ninguna vista calcula precios por su cuenta.
+const cadena = computed(() =>
+  calcularCadena(precioProveedor.value, descuentoCatalogo.value, utilidadEfectiva.value),
+)
 
-const precioConIva = computed(() => {
-  const precio = parseFloat(precioUnitarioSinIva.value)
-  return Number.isFinite(precio) ? (precio * 1.16).toFixed(2) : '0.00'
-})
+const descuentoMonto = computed(() =>
+  redondeo2(precioProveedor.value - cadena.value.costo_con_descuento),
+)
+const precioFinal = computed(() => precioConIva(cadena.value.precio_unitario_sin_iva))
+const ivaMonto = computed(() => redondeo2(precioFinal.value - cadena.value.precio_unitario_sin_iva))
 
-const utilidadMonto = computed(() => {
-  const costo = parseFloat(costoConDescuento.value)
-  const precio = parseFloat(precioUnitarioSinIva.value)
-  if (!Number.isFinite(costo) || !Number.isFinite(precio)) return '0.00'
-  return (precio - costo).toFixed(2)
-})
+// Aviso no bloqueante: por encima de este porcentaje es mucho más probable un dedazo (1000 en vez
+// de 100) que un markup real, pero el markup alto es legítimo y no se impide guardar.
+const UMBRAL_PORCENTAJE_ALTO = 200
+const porcentajeAlto = computed(() => utilidadEfectiva.value > UMBRAL_PORCENTAJE_ALTO)
+
+function pesos(valor: number): string {
+  return valor.toFixed(2)
+}
 
 const cargando = ref(false)
 const guardando = ref(false)
 const errorGeneral = ref<string | null>(null)
 const erroresPorCampo = ref<Record<string, string>>({})
+// Discrepancia entre el precio que mostró el formulario y el que devolvió el servidor al guardar.
+// En operación normal nunca se activa; es la red para un frontend desplegado desactualizado.
+const avisoDiscrepancia = ref<string | null>(null)
 
 onMounted(async () => {
   if (!articuloId.value) return
@@ -121,10 +125,35 @@ onMounted(async () => {
   }
 })
 
+/**
+ * Compara la cadena que mostró el formulario contra la que devolvió el servidor. Si no coinciden,
+ * el usuario aprobó un precio distinto del que quedó guardado y hay que decírselo en vez de navegar
+ * en silencio (ver 011-precio-proveedor-utilidad.md).
+ */
+function discrepancia(guardado: Articulo): string | null {
+  const local = cadena.value
+
+  if (
+    guardado.costo_con_descuento === local.costo_con_descuento &&
+    guardado.precio_unitario_sin_iva === local.precio_unitario_sin_iva &&
+    guardado.utilidad === local.utilidad
+  ) {
+    return null
+  }
+
+  return (
+    `El precio guardado no coincide con el que mostró este formulario. Quedó registrado un costo ` +
+    `de $${pesos(guardado.costo_con_descuento)} y un precio de venta de ` +
+    `$${pesos(guardado.precio_unitario_sin_iva)}, en lugar de $${pesos(local.costo_con_descuento)} ` +
+    `y $${pesos(local.precio_unitario_sin_iva)}. Recarga la página y verifica el artículo.`
+  )
+}
+
 async function onSubmit() {
   guardando.value = true
   errorGeneral.value = null
   erroresPorCampo.value = {}
+  avisoDiscrepancia.value = null
 
   const payload: ArticuloPayload = {
     catalogo_id: form.catalogo_id,
@@ -138,11 +167,14 @@ async function onSubmit() {
   }
 
   try {
-    if (esEdicion.value && articuloId.value) {
-      await articulos.update(articuloId.value, payload)
-    } else {
-      await articulos.create(payload)
-    }
+    const guardado =
+      esEdicion.value && articuloId.value
+        ? await articulos.update(articuloId.value, payload)
+        : await articulos.create(payload)
+
+    avisoDiscrepancia.value = discrepancia(guardado)
+
+    if (avisoDiscrepancia.value) return
 
     await router.push({ name: 'articulos' })
   } catch (err) {
@@ -163,6 +195,10 @@ async function onSubmit() {
 
       <Alert v-if="errorGeneral" variant="destructive">
         <AlertDescription>{{ errorGeneral }}</AlertDescription>
+      </Alert>
+
+      <Alert v-if="avisoDiscrepancia" variant="destructive">
+        <AlertDescription>{{ avisoDiscrepancia }}</AlertDescription>
       </Alert>
 
       <form v-if="!cargando" class="space-y-6" @submit.prevent="onSubmit">
@@ -229,11 +265,6 @@ async function onSubmit() {
                 step="0.01"
                 required
               />
-              <p class="text-muted-foreground text-sm">
-                Costo con descuento del catálogo ({{ descuentoCatalogo }}%): ${{
-                  costoConDescuento
-                }}
-              </p>
               <p v-if="erroresPorCampo.precio_proveedor" class="text-destructive text-sm">
                 {{ erroresPorCampo.precio_proveedor }}
               </p>
@@ -246,26 +277,60 @@ async function onSubmit() {
                 v-model="form.utilidad_porcentaje"
                 type="number"
                 min="0"
+                max="999.99"
                 step="0.01"
                 placeholder="Usa la utilidad del catálogo"
               />
               <p class="text-muted-foreground text-sm">
                 Si se deja vacío se usa la utilidad del catálogo ({{ utilidadCatalogo }}%).
               </p>
+              <p v-if="porcentajeAlto" class="text-sm text-amber-600 dark:text-amber-500">
+                Una utilidad del {{ utilidadEfectiva }}% multiplica el costo por
+                {{ (1 + utilidadEfectiva / 100).toFixed(2) }}. Verifica que sea el valor que
+                querías.
+              </p>
               <p v-if="erroresPorCampo.utilidad_porcentaje" class="text-destructive text-sm">
                 {{ erroresPorCampo.utilidad_porcentaje }}
               </p>
             </div>
 
-            <div class="space-y-1.5">
-              <Label>Precio unitario sin IVA (MXN)</Label>
-              <Input :model-value="precioUnitarioSinIva" disabled />
-              <p class="text-muted-foreground text-sm">
-                Utilidad: ${{ utilidadMonto }} ({{ utilidadEfectiva }}%)
-              </p>
-              <p class="text-muted-foreground text-sm">
-                Precio con IVA (16%, solo referencia): ${{ precioConIva }}
-              </p>
+            <!-- Resumen de la cadena de cálculo, siempre visible y en vivo (ver 011). -->
+            <div class="bg-muted/40 space-y-1.5 rounded-md border p-4">
+              <p class="text-foreground text-sm font-medium">Cadena de cálculo</p>
+              <dl class="text-sm">
+                <div class="flex justify-between gap-4 py-0.5">
+                  <dt class="text-muted-foreground">Precio de lista del proveedor</dt>
+                  <dd class="tabular-nums">${{ pesos(precioProveedor) }}</dd>
+                </div>
+                <div class="flex justify-between gap-4 py-0.5">
+                  <dt class="text-muted-foreground">
+                    Descuento del catálogo ({{ descuentoCatalogo }}%)
+                  </dt>
+                  <dd class="tabular-nums">−${{ pesos(descuentoMonto) }}</dd>
+                </div>
+                <div class="flex justify-between gap-4 border-t py-0.5 pt-1.5">
+                  <dt class="text-muted-foreground">Costo</dt>
+                  <dd class="tabular-nums">${{ pesos(cadena.costo_con_descuento) }}</dd>
+                </div>
+                <div class="flex justify-between gap-4 py-0.5">
+                  <dt class="text-muted-foreground">Utilidad ({{ utilidadEfectiva }}%)</dt>
+                  <dd class="tabular-nums">+${{ pesos(cadena.utilidad) }}</dd>
+                </div>
+                <div class="flex justify-between gap-4 border-t py-0.5 pt-1.5">
+                  <dt class="text-foreground font-medium">Precio de venta sin IVA</dt>
+                  <dd class="tabular-nums font-medium">
+                    ${{ pesos(cadena.precio_unitario_sin_iva) }}
+                  </dd>
+                </div>
+                <div class="flex justify-between gap-4 py-0.5">
+                  <dt class="text-muted-foreground">IVA (16%)</dt>
+                  <dd class="tabular-nums">+${{ pesos(ivaMonto) }}</dd>
+                </div>
+                <div class="flex justify-between gap-4 border-t py-0.5 pt-1.5">
+                  <dt class="text-foreground font-medium">Precio de venta con IVA</dt>
+                  <dd class="tabular-nums font-medium">${{ pesos(precioFinal) }}</dd>
+                </div>
+              </dl>
             </div>
           </CardContent>
         </Card>

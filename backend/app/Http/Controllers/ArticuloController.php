@@ -30,6 +30,17 @@ class ArticuloController extends Controller
         'clave_unidad',
         'objeto_imp',
         'precio_proveedor',
+        'utilidad_porcentaje',
+    ];
+
+    /**
+     * Columnas numéricas ordenables del listado (ver 011-precio-proveedor-utilidad.md). La utilidad
+     * no está persistida, así que se ordena por la expresión que la define.
+     */
+    private const ORDENACIONES = [
+        'costo_con_descuento' => 'costo_con_descuento',
+        'precio_unitario_sin_iva' => 'precio_unitario_sin_iva',
+        'utilidad' => 'precio_unitario_sin_iva - costo_con_descuento',
     ];
 
     /**
@@ -37,10 +48,10 @@ class ArticuloController extends Controller
      */
     public function index(Request $request): AnonymousResourceCollection
     {
-        $articulos = $this->filtrarBusqueda($request->user()->articulos(), $request)
+        $articulos = $this->ordenar($this->filtrarBusqueda($request->user()->articulos(), $request), $request)
             ->with('catalogo.proveedor')
-            ->orderBy('nombre')
-            ->paginate(15);
+            ->paginate(15)
+            ->withQueryString();
 
         return ArticuloResource::collection($articulos);
     }
@@ -148,6 +159,10 @@ class ArticuloController extends Controller
 
             $datos = array_combine($columnas, $registro) ?: [];
 
+            // Celda de porcentaje vacía = hereda el del catálogo destino (ver 011). Se normaliza a
+            // null antes de validar para que la regla `nullable` la deje pasar.
+            $utilidad = trim((string) ($datos['utilidad_porcentaje'] ?? ''));
+
             $validator = Validator::make(
                 [
                     'nombre' => trim((string) ($datos['nombre'] ?? '')),
@@ -156,6 +171,7 @@ class ArticuloController extends Controller
                     'clave_unidad' => strtoupper(trim((string) ($datos['clave_unidad'] ?? ''))),
                     'objeto_imp' => trim((string) ($datos['objeto_imp'] ?? '')),
                     'precio_proveedor' => trim((string) ($datos['precio_proveedor'] ?? '')),
+                    'utilidad_porcentaje' => $utilidad === '' ? null : $utilidad,
                 ],
                 [
                     'nombre' => [
@@ -171,6 +187,7 @@ class ArticuloController extends Controller
                     'clave_unidad' => ['required', 'string', new ClaveUnidadValido],
                     'objeto_imp' => ['required', Rule::enum(ObjetoImpuesto::class)],
                     'precio_proveedor' => ['required', 'numeric', 'gt:0', 'decimal:0,2'],
+                    'utilidad_porcentaje' => ['nullable', 'numeric', 'gte:0', 'lte:999.99', 'decimal:0,2'],
                 ],
             );
 
@@ -185,7 +202,7 @@ class ArticuloController extends Controller
             $cadena = PrecioArticuloCalculator::calcularCadena(
                 (float) $filaValidada['precio_proveedor'],
                 (float) $catalogo->descuento,
-                (float) $catalogo->utilidad_porcentaje,
+                (float) ($filaValidada['utilidad_porcentaje'] ?? $catalogo->utilidad_porcentaje),
             );
 
             $request->user()->articulos()->create([
@@ -208,8 +225,7 @@ class ArticuloController extends Controller
      */
     public function exportarCsv(Request $request): StreamedResponse
     {
-        $articulos = $this->filtrarBusqueda($request->user()->articulos(), $request)
-            ->orderBy('nombre')
+        $articulos = $this->ordenar($this->filtrarBusqueda($request->user()->articulos(), $request), $request)
             ->get();
 
         return response()->streamDownload(function () use ($articulos) {
@@ -224,11 +240,34 @@ class ArticuloController extends Controller
                     $articulo->clave_unidad,
                     $articulo->objeto_imp->value,
                     $articulo->precio_proveedor,
+                    // Celda vacía cuando el artículo hereda el porcentaje del catálogo, para que el
+                    // archivo exportado sea reimportable conservando la herencia (ver 011).
+                    $articulo->utilidad_porcentaje,
                 ]);
             }
 
             fclose($handle);
         }, 'articulos.csv', ['Content-Type' => 'text/csv']);
+    }
+
+    /**
+     * Aplica ?sort= y ?direction= sobre las columnas numéricas del listado. Un `sort` no reconocido
+     * se ignora y se cae al orden por defecto por nombre (ver 011-precio-proveedor-utilidad.md).
+     *
+     * @param  Builder<Articulo>  $query
+     * @return Builder<Articulo>
+     */
+    private function ordenar(Builder $query, Request $request): Builder
+    {
+        $expresion = self::ORDENACIONES[$request->string('sort')->toString()] ?? null;
+
+        if ($expresion === null) {
+            return $query->orderBy('nombre');
+        }
+
+        $direccion = $request->string('direction')->lower()->toString() === 'desc' ? 'desc' : 'asc';
+
+        return $query->orderByRaw("$expresion $direccion")->orderBy('nombre');
     }
 
     /**

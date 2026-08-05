@@ -46,11 +46,17 @@ interface PaginationMeta {
   total: number
 }
 
+/** Columnas numéricas ordenables del listado (ver 011-precio-proveedor-utilidad.md). */
+export type ArticuloSort = 'costo_con_descuento' | 'precio_unitario_sin_iva' | 'utilidad'
+export type SortDirection = 'asc' | 'desc'
+
 export const useArticulosStore = defineStore('articulos', {
   state: () => ({
     items: [] as Articulo[],
     meta: null as PaginationMeta | null,
     search: '',
+    sort: null as ArticuloSort | null,
+    direction: 'asc' as SortDirection,
     loading: false,
     error: null as string | null,
   }),
@@ -62,7 +68,12 @@ export const useArticulosStore = defineStore('articulos', {
 
       try {
         const { data } = await http.get('/articulos', {
-          params: { page, search: this.search || undefined },
+          params: {
+            page,
+            search: this.search || undefined,
+            sort: this.sort ?? undefined,
+            direction: this.sort ? this.direction : undefined,
+          },
         })
         this.items = data.data
         this.meta = data.meta
@@ -105,9 +116,28 @@ export const useArticulosStore = defineStore('articulos', {
       return data
     },
 
+    /** Alterna la ordenación de una columna: asc -> desc -> sin ordenar. */
+    async toggleSort(columna: ArticuloSort) {
+      if (this.sort !== columna) {
+        this.sort = columna
+        this.direction = 'asc'
+      } else if (this.direction === 'asc') {
+        this.direction = 'desc'
+      } else {
+        this.sort = null
+        this.direction = 'asc'
+      }
+
+      await this.fetchList(1)
+    },
+
     async exportarCsv() {
       const { data } = await http.get('/articulos/exportar-csv', {
-        params: { search: this.search || undefined },
+        params: {
+          search: this.search || undefined,
+          sort: this.sort ?? undefined,
+          direction: this.sort ? this.direction : undefined,
+        },
         responseType: 'blob',
       })
 

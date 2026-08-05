@@ -46,7 +46,7 @@ class UpdateCatalogoRequest extends FormRequest
                     ->ignore($this->route('catalogo')),
             ],
             'descuento' => ['required', 'numeric', 'between:0,100', 'decimal:0,2'],
-            'utilidad_porcentaje' => ['required', 'numeric', 'gte:0', 'lt:100', 'decimal:0,2'],
+            'utilidad_porcentaje' => ['required', 'numeric', 'gte:0', 'lte:999.99', 'decimal:0,2'],
         ];
     }
 }

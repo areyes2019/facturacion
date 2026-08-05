@@ -66,7 +66,7 @@ class StoreArticuloRequest extends FormRequest
             'clave_unidad' => ['required', 'string', new ClaveUnidadValido],
             'objeto_imp' => ['required', Rule::enum(ObjetoImpuesto::class)],
             'precio_proveedor' => ['required', 'numeric', 'gt:0', 'decimal:0,2'],
-            'utilidad_porcentaje' => ['nullable', 'numeric', 'gte:0', 'lt:100', 'decimal:0,2'],
+            'utilidad_porcentaje' => ['nullable', 'numeric', 'gte:0', 'lte:999.99', 'decimal:0,2'],
         ];
     }
 }
