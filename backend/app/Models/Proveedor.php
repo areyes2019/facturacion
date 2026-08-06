@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\EstadoOrdenCompra;
 use Database\Factories\ProveedorFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -16,7 +17,6 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'correo',
     'telefono',
     'rfc',
-    'tiene_ordenes_activas',
 ])]
 class Proveedor extends Model
 {
@@ -24,13 +24,6 @@ class Proveedor extends Model
     use HasFactory, SoftDeletes;
 
     protected $table = 'proveedores';
-
-    /**
-     * @var array<string, mixed>
-     */
-    protected $attributes = [
-        'tiene_ordenes_activas' => false,
-    ];
 
     public function user(): BelongsTo
     {
@@ -42,13 +35,23 @@ class Proveedor extends Model
         return $this->hasMany(Catalogo::class);
     }
 
-    /**
-     * @return array<string, string>
-     */
-    protected function casts(): array
+    public function ordenesCompra(): HasMany
     {
-        return [
-            'tiene_ordenes_activas' => 'boolean',
-        ];
+        return $this->hasMany(OrdenCompra::class);
+    }
+
+    /**
+     * Bloquea el borrado del proveedor mientras tenga al menos una orden de compra sin cerrar su
+     * ciclo (cualquier estado distinto de `recibida`, incluido `borrador`).
+     *
+     * 005 sembró esto como columna booleana esperando al módulo de Órdenes de compra; ahora que
+     * existe, se **deriva por consulta** en vez de mantener una columna sincronizada a mano en cada
+     * alta, cambio de estado y borrado de orden (ver 012-ordenes-compra.md, adición técnica 37).
+     */
+    public function tieneOrdenesActivas(): bool
+    {
+        return $this->ordenesCompra()
+            ->where('estado', '!=', EstadoOrdenCompra::Recibida->value)
+            ->exists();
     }
 }

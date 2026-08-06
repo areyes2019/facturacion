@@ -16,13 +16,40 @@ export interface ArticuloResultado {
   id: number
   nombre: string
   modelo: string
+  /** Precio de venta al cliente (factura y cotización). */
   precio_unitario_sin_iva: number
+  /** Costo real: lo que le pagas al proveedor (orden de compra), ver 011. */
+  costo_con_descuento: number
 }
+
+const props = withDefaults(
+  defineProps<{
+    /**
+     * Cuando se indica, el buscador solo ofrece artículos de catálogos de ese proveedor: le
+     * compras a un proveedor lo que ese proveedor vende (ver 012-ordenes-compra.md).
+     */
+    proveedorId?: number | null
+    /** Qué precio se muestra en cada resultado: el de venta o el costo. */
+    origenPrecio?: 'venta' | 'costo'
+    placeholder?: string
+  }>(),
+  {
+    proveedorId: null,
+    origenPrecio: 'venta',
+    placeholder: 'Buscar artículo por nombre, modelo o proveedor para agregarlo...',
+  },
+)
 
 const emit = defineEmits<{ seleccionar: [articulo: ArticuloResultado] }>()
 
 const resultados = ref<ArticuloResultado[]>([])
 const buscando = ref(false)
+
+function precioMostrado(articulo: ArticuloResultado): number {
+  return props.origenPrecio === 'costo'
+    ? articulo.costo_con_descuento
+    : articulo.precio_unitario_sin_iva
+}
 
 const buscar = useDebounceFn(async (texto: string) => {
   if (texto.trim().length < 2) {
@@ -32,7 +59,9 @@ const buscar = useDebounceFn(async (texto: string) => {
 
   buscando.value = true
   try {
-    const { data } = await http.get('/articulos', { params: { search: texto } })
+    const { data } = await http.get('/articulos', {
+      params: { search: texto, proveedor_id: props.proveedorId ?? undefined },
+    })
     resultados.value = data.data
   } finally {
     buscando.value = false
@@ -58,7 +87,7 @@ function onSeleccionar(id: string | null) {
     <ComboboxAnchor class="w-full">
       <ComboboxInput
         class="w-full"
-        placeholder="Buscar artículo por nombre, modelo o proveedor para agregarlo..."
+        :placeholder="placeholder"
         :display-value="() => ''"
         @update:model-value="buscar($event as string)"
       />
@@ -69,7 +98,7 @@ function onSeleccionar(id: string | null) {
           {{ resultados.length === 0 ? 'Escribe al menos 2 caracteres para buscar.' : '' }}
         </ComboboxEmpty>
         <ComboboxItem v-for="item in resultados" :key="item.id" :value="item.id.toString()">
-          {{ item.nombre }} ({{ item.modelo }}) — ${{ item.precio_unitario_sin_iva.toFixed(2) }}
+          {{ item.nombre }} ({{ item.modelo }}) — ${{ precioMostrado(item).toFixed(2) }}
         </ComboboxItem>
       </ComboboxViewport>
     </ComboboxList>

@@ -9,20 +9,17 @@ use App\Http\Requests\Cotizaciones\EnviarCotizacionRequest;
 use App\Http\Requests\Cotizaciones\StoreCotizacionRequest;
 use App\Http\Requests\Cotizaciones\UpdateCotizacionRequest;
 use App\Http\Resources\CotizacionResource;
-use App\Mail\CotizacionEnviadaMail;
 use App\Models\Cotizacion;
 use App\Models\CotizacionPago;
+use App\Services\EnvioDocumentoService;
 use App\Services\FacturaTotalesCalculator;
 use App\Services\TesoreriaService;
-use App\Services\TwilioWhatsAppService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Facades\URL;
 use Illuminate\Validation\ValidationException;
 
 class CotizacionController extends Controller
@@ -35,7 +32,7 @@ class CotizacionController extends Controller
     private const ZONA_HORARIA_NEGOCIO = 'America/Mexico_City';
 
     public function __construct(
-        private readonly TwilioWhatsAppService $whatsapp,
+        private readonly EnvioDocumentoService $envio,
         private readonly TesoreriaService $tesoreria,
     ) {}
 
@@ -156,15 +153,10 @@ class CotizacionController extends Controller
     {
         abort_unless($cotizacion->user_id === $request->user()->id, 404);
 
-        $cotizacion->load(['cliente', 'lineas.articulo']);
-
         if ($request->validated('canal') === 'correo') {
-            $pdf = app('dompdf.wrapper')->loadView('pdf.cotizacion', ['cotizacion' => $cotizacion])->output();
-            Mail::to($request->validated('destinatarios'))->send(new CotizacionEnviadaMail($cotizacion, $pdf));
+            $this->envio->enviarPorCorreo($cotizacion, $request->validated('destinatarios'));
         } else {
-            $urlPdf = URL::temporarySignedRoute('cotizaciones.pdf-publico', now()->addMinutes(10), ['cotizacion' => $cotizacion->id]);
-            $mensaje = "Cotización {$cotizacion->folio} por un total de $".number_format((float) $cotizacion->total, 2).' MXN.';
-            $this->whatsapp->enviar((string) $request->validated('telefono'), $mensaje, $urlPdf);
+            $this->envio->enviarPorWhatsApp($cotizacion, (string) $request->validated('telefono'));
         }
 
         if ($cotizacion->estado === EstadoCotizacion::Borrador) {
@@ -183,22 +175,14 @@ class CotizacionController extends Controller
     {
         abort_unless($request->hasValidSignature(), 403);
 
-        $cotizacion->load(['cliente', 'lineas.articulo']);
-
-        $pdf = app('dompdf.wrapper')->loadView('pdf.cotizacion', ['cotizacion' => $cotizacion]);
-
-        return $pdf->stream('cotizacion-'.$cotizacion->folio.'.pdf');
+        return $this->envio->streamPdf($cotizacion);
     }
 
     public function pdf(Request $request, Cotizacion $cotizacion): Response
     {
         abort_unless($cotizacion->user_id === $request->user()->id, 404);
 
-        $cotizacion->load(['cliente', 'lineas.articulo']);
-
-        $pdf = app('dompdf.wrapper')->loadView('pdf.cotizacion', ['cotizacion' => $cotizacion]);
-
-        return $pdf->stream('cotizacion-'.$cotizacion->folio.'.pdf');
+        return $this->envio->streamPdf($cotizacion);
     }
 
     /**

@@ -102,9 +102,14 @@ class TesoreriaService
     }
 
     /**
-     * Genera el movimiento automático que corresponde a un documento de otro módulo (hoy solo
-     * `CotizacionPago`). El `concepto` lo arma quien llama a partir del documento origen y no es
-     * editable por el usuario.
+     * Genera el movimiento automático que corresponde a un documento de otro módulo: hoy un
+     * `CotizacionPago` (ingreso, 010) o una `OrdenCompra` pagada (egreso, 012). El `tipo` es
+     * parámetro justamente para eso; el `concepto` lo arma quien llama a partir del documento
+     * origen y no es editable por el usuario.
+     *
+     * La regla de saldo no negativo, que con ingresos nunca se activaba, sí aplica a los egresos:
+     * si el pago dejaría la cuenta por debajo de cero, la excepción revierte la transacción
+     * completa y el documento no queda marcado como pagado.
      */
     public function registrarDesdeDocumento(
         User $user,

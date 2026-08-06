@@ -276,13 +276,19 @@ class ArticuloController extends Controller
      */
     private function filtrarBusqueda(Builder $query, Request $request): Builder
     {
-        return $query->when($request->string('search')->trim()->isNotEmpty(), function ($query) use ($request) {
-            $search = '%'.$request->string('search')->trim().'%';
-            $query->where(function ($query) use ($search) {
-                $query->where('nombre', 'like', $search)
-                    ->orWhere('modelo', 'like', $search)
-                    ->orWhereHas('catalogo.proveedor', fn ($query) => $query->where('nombre_comercial', 'like', $search));
+        return $query
+            ->when($request->string('search')->trim()->isNotEmpty(), function ($query) use ($request) {
+                $search = '%'.$request->string('search')->trim().'%';
+                $query->where(function ($query) use ($search) {
+                    $query->where('nombre', 'like', $search)
+                        ->orWhere('modelo', 'like', $search)
+                        ->orWhereHas('catalogo.proveedor', fn ($query) => $query->where('nombre_comercial', 'like', $search));
+                });
+            })
+            // Alimenta el selector de artículos del formulario de Orden de compra: le compras a un
+            // proveedor lo que ese proveedor vende (ver 012-ordenes-compra.md, adición técnica 41).
+            ->when($request->integer('proveedor_id') > 0, function ($query) use ($request) {
+                $query->whereHas('catalogo', fn ($q) => $q->where('proveedor_id', $request->integer('proveedor_id')));
             });
-        });
     }
 }

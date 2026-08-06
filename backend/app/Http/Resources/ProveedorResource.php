@@ -21,7 +21,9 @@ class ProveedorResource extends JsonResource
             'correo' => $this->correo,
             'telefono' => $this->telefono,
             'rfc' => $this->rfc,
-            'tiene_ordenes_activas' => $this->tiene_ordenes_activas,
+            // Derivado por consulta, no una columna (ver 012-ordenes-compra.md, adición técnica
+            // 37): el campo que expone la API no cambia de forma ni de nombre.
+            'tiene_ordenes_activas' => $this->tieneOrdenesActivas(),
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
         ];

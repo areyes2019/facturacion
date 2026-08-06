@@ -82,6 +82,13 @@ async function onLogout() {
             >
               Cotizaciones
             </RouterLink>
+            <RouterLink
+              :to="{ name: 'ordenes-compra' }"
+              class="text-muted-foreground hover:text-foreground"
+              active-class="text-foreground font-medium"
+            >
+              Órdenes de compra
+            </RouterLink>
             <!-- El nombre visible es "Contabilidad"; el módulo, sus rutas (/tesoreria/...) y sus
                  clases siguen llamándose Tesorería (ver 010-tesoreria.md). -->
             <Popover>

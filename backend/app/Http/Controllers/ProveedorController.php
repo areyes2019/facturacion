@@ -71,7 +71,7 @@ class ProveedorController extends Controller
         abort_unless($proveedor->user_id === $request->user()->id, 404);
 
         abort_if(
-            $proveedor->tiene_ordenes_activas,
+            $proveedor->tieneOrdenesActivas(),
             409,
             'No se puede eliminar: tiene órdenes de compra activas'
         );

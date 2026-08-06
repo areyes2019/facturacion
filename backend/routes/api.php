@@ -8,6 +8,7 @@ use App\Http\Controllers\CotizacionController;
 use App\Http\Controllers\CuentaController;
 use App\Http\Controllers\FacturaController;
 use App\Http\Controllers\MovimientoController;
+use App\Http\Controllers\OrdenCompraController;
 use App\Http\Controllers\ProveedorController;
 use App\Http\Controllers\TransferenciaController;
 use Illuminate\Http\Request;
@@ -19,6 +20,10 @@ Route::prefix('auth')->group(base_path('routes/auth.php'));
 // sesión — exclusivo para que Twilio lo descargue al enviar el WhatsApp (ver 008-cotizaciones.md).
 Route::get('cotizaciones/{cotizacion}/pdf-publico', [CotizacionController::class, 'pdfPublico'])
     ->name('cotizaciones.pdf-publico')
+    ->middleware('signed');
+
+Route::get('ordenes-compra/{ordenCompra}/pdf-publico', [OrdenCompraController::class, 'pdfPublico'])
+    ->name('ordenes-compra.pdf-publico')
     ->middleware('signed');
 
 Route::middleware(['auth:sanctum'])->group(function () {
@@ -57,6 +62,18 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('cotizaciones/{cotizacion}/entregar', [CotizacionController::class, 'entregar']);
     Route::post('cotizaciones/{cotizacion}/duplicar', [CotizacionController::class, 'duplicar']);
     Route::get('cotizaciones/{cotizacion}/pdf', [CotizacionController::class, 'pdf']);
+
+    // Órdenes de compra (ver 012-ordenes-compra.md). El `->parameters()` es obligatorio: sin él,
+    // Laravel singulariza "ordenes-compra" en inglés y genera un parámetro de ruta que rompe el
+    // binding implícito de modelo (misma lección de 005 y 008).
+    Route::apiResource('ordenes-compra', OrdenCompraController::class)
+        ->parameters(['ordenes-compra' => 'ordenCompra']);
+    Route::post('ordenes-compra/{ordenCompra}/enviar', [OrdenCompraController::class, 'enviar']);
+    Route::post('ordenes-compra/{ordenCompra}/pagar', [OrdenCompraController::class, 'pagar']);
+    Route::delete('ordenes-compra/{ordenCompra}/pago', [OrdenCompraController::class, 'cancelarPago']);
+    Route::post('ordenes-compra/{ordenCompra}/recibir', [OrdenCompraController::class, 'recibir']);
+    Route::post('ordenes-compra/{ordenCompra}/duplicar', [OrdenCompraController::class, 'duplicar']);
+    Route::get('ordenes-compra/{ordenCompra}/pdf', [OrdenCompraController::class, 'pdf']);
 
     // Tesorería (ver 010-tesoreria.md). "saldos" se registra antes del apiResource para que no lo
     // capture el parámetro {cuenta}, igual que articulos/exportar-csv más arriba.

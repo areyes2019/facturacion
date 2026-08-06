@@ -373,6 +373,74 @@ orden. La corrección se hace desde ahí, cancelando el pago.
 - Múltiples divisas y tipo de cambio: todo en MXN, mismo criterio que 007/008/010/011.
 - Roles/permisos diferenciados y multiempresa (mismo patrón que 004/005/006/007/008/009/010).
 
+## Estado de implementación
+
+Implementada el 2026-08-05.
+
+- **El pago sin tabla funcionó como se diseñó**: `cuenta_id`/`fecha_pago` en `ordenes_compra` y el
+  `Movimiento` apuntando con `documentable` a la `OrdenCompra` misma. `TesoreriaService::registrarDesdeDocumento()`
+  **ya recibía el `TipoMovimiento` como parámetro** desde 010, así que la adición técnica 38 no
+  requirió refactorizar el servicio: bastó con llamarlo con `TipoMovimiento::Egreso`. Solo se
+  actualizó su documentación para reflejar que ahora atiende dos tipos de documento origen.
+- **La generalización del envío conservó los mailables por documento**: en vez de un mailable
+  genérico, `CotizacionEnviadaMail` y `OrdenCompraEnviadaMail` extienden un
+  `DocumentoEnviadoMail` abstracto que arma el adjunto. Así el `Mail::assertSent(CotizacionEnviadaMail::class)`
+  de 008 siguió siendo válido y el asunto de cada correo sigue siendo propio. El contrato
+  `DocumentoEnviable` (vista del PDF, datos, nombre de archivo, mailable, resumen de WhatsApp y URL
+  pública firmada) lo implementan los dos modelos, y `EnvioDocumentoService` concentra la
+  generación del PDF y ambos canales.
+- **Parámetro de ruta en camelCase**: se usó `->parameters(['ordenes-compra' => 'ordenCompra'])` en
+  lugar del `orden_compra` que anticipaba la spec, para que el argumento del controller sea
+  `$ordenCompra` y no `$orden_compra`. El efecto es el mismo —evitar la singularización en inglés
+  que rompe el binding implícito— y el código queda en la convención de nombres de PHP.
+- **Bug encontrado y corregido durante la verificación por HTTP**: una orden `recibida` deja de
+  bloquear el borrado de su proveedor, así que el proveedor puede quedar eliminado (soft delete)
+  mientras la orden sigue existiendo como documento histórico. Con la relación normal, el detalle
+  devolvía el proveedor en `null` y el PDF respondía `500`
+  (*Attempt to read property "nombre_comercial" on null*). Se corrigió declarando
+  `belongsTo(Proveedor::class)->withTrashed()` en `OrdenCompra::proveedor()`, cubierto por un test
+  propio. **La misma situación existe en 008** (`Cotizacion::cliente()` sin `withTrashed()`): un
+  cliente con soft delete rompería el PDF de sus cotizaciones. No se tocó, por quedar fuera del
+  alcance de esta historia.
+- **El fixture de totales confirmó que ambas implementaciones ya coincidían**: los 8 casos
+  (`shared/fixtures/totales-documento.json`) pasaron a la primera en PHPUnit y en Vitest, así que
+  no había divergencia acumulada entre PHP y TypeScript; lo que se ganó es la señal para que no
+  aparezca en el futuro. Los valores esperados se derivaron a mano y se verificaron primero contra
+  el backend, que es la implementación autoritativa.
+- **El componente compartido de líneas absorbió también el bloque de totales**: `DocumentoLineas.vue`
+  contiene las dos tarjetas (Artículos y Descuento global y totales) y los tres formularios lo
+  consumen. `FacturaFormView.vue` y `CotizacionFormView.vue` perdieron ~90 líneas de cálculo
+  duplicado cada uno, que ahora viven en `src/lib/totalesDocumento.ts`.
+- **Verificación end-to-end**: la suite Pest completa (28 tests nuevos en
+  `tests/Feature/OrdenesCompraTest.php`, 8 en `tests/Unit/TotalesDocumentoTest.php`, 222 en total
+  del proyecto) pasa contra SQLite en memoria, con `TwilioWhatsAppService` mockeado (Mockery) y
+  `Mail::fake()` donde aplica. Pint corre sin cambios pendientes. En el frontend, `vue-tsc -b`,
+  ESLint, Prettier y Vitest (30 tests) corren limpios, y `vite build` compila la SPA completa.
+- **Verificación por HTTP contra MySQL y Mailpit reales**: con las migraciones aplicadas a la base
+  de desarrollo y un usuario/token de Sanctum de prueba (creado y eliminado al terminar), se
+  recorrió el flujo completo: alta de proveedor → catálogo (10% de descuento, 25% de utilidad) →
+  artículo (lista $200 → costo $180, venta $225) → filtro `?proveedor_id=` → orden de compra con la
+  línea al **costo** ($180, no $225) por un total de $417.60 → `409` al intentar borrar el
+  proveedor con la orden en borrador → `422` al intentar pagar en borrador → envío por correo
+  recibido en Mailpit con el asunto "Orden de compra OC-00001" → **pago rechazado con `422` por
+  saldo insuficiente** ($300 en la cuenta contra $417.60), quedando la orden en `enviada` y sin
+  movimiento → fondeo de la cuenta → pago con un `monto` manipulado de $1.00 en el body, que se
+  ignoró y registró los $417.60 correctos → saldo $800 − $417.60 = **$382.40** → egreso automático
+  con concepto "Pago de Orden de compra OC-00001" y su documento origen → `422` al editar una orden
+  pagada → cancelación del pago, que devolvió el saldo a $800, borró el movimiento y regresó la
+  orden a `enviada` → repago y recepción → `422` al cancelar el pago de una orden recibida → borrado
+  del proveedor ya permitido (`204`) → PDF de la orden.
+- **No se pudo verificar visualmente la UI en un navegador real** (misma limitación de entorno
+  Windows que en 004/005/006/007/008/010/011). Es especialmente recomendable revisarla a mano en
+  esta historia, porque el refactor del componente de líneas toca los formularios de **factura y
+  cotización** y el frontend no tiene pruebas de componentes: conviene abrir `/facturas/crear`,
+  `/cotizaciones/crear` y `/ordenes-compra/crear` y confirmar que la tabla, el buscador de
+  artículos y el desglose de totales siguen comportándose igual, además del detalle de la orden
+  (envío, registro y cancelación del pago, recepción, duplicar).
+- **El envío por WhatsApp sigue sin credenciales de Twilio** (mismo estado que 008): la
+  construcción del payload y de la URL firmada se verificaron con el test de Mockery, pero no
+  contra la API real.
+
 ## Criterios de aceptación
 
 1. Un usuario autenticado puede crear una orden de compra seleccionando un proveedor y una o varias

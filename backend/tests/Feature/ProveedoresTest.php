@@ -1,5 +1,7 @@
 <?php
 
+use App\Enums\EstadoOrdenCompra;
+use App\Models\OrdenCompra;
 use App\Models\Proveedor;
 use App\Models\User;
 use PhpCfdi\Rfc\RfcFaker;
@@ -187,7 +189,10 @@ test('editar un proveedor existente persiste los cambios', function () {
 
 test('eliminar un proveedor sin ordenes activas lo remueve del listado pero no lo borra fisicamente', function () {
     $user = User::factory()->create();
-    $proveedor = Proveedor::factory()->for($user)->create(['tiene_ordenes_activas' => false]);
+    $proveedor = Proveedor::factory()->for($user)->create();
+
+    // Una orden ya recibida cerró su ciclo y no bloquea el borrado (ver 012-ordenes-compra.md).
+    OrdenCompra::factory()->for($user)->for($proveedor)->create(['estado' => EstadoOrdenCompra::Recibida->value]);
 
     $this->actingAs($user)->deleteJson("/api/v1/proveedores/{$proveedor->id}")->assertNoContent();
 
@@ -197,10 +202,25 @@ test('eliminar un proveedor sin ordenes activas lo remueve del listado pero no l
 
 test('eliminar un proveedor con ordenes activas responde 409 y no lo elimina', function () {
     $user = User::factory()->create();
-    $proveedor = Proveedor::factory()->for($user)->create(['tiene_ordenes_activas' => true]);
+    $proveedor = Proveedor::factory()->for($user)->create();
+
+    OrdenCompra::factory()->for($user)->for($proveedor)->create(['estado' => EstadoOrdenCompra::Enviada->value]);
 
     $response = $this->actingAs($user)->deleteJson("/api/v1/proveedores/{$proveedor->id}");
 
     $response->assertStatus(409);
     $this->assertDatabaseHas('proveedores', ['id' => $proveedor->id, 'deleted_at' => null]);
+});
+
+// Incluye `borrador`: si hay un borrador colgando, borrarlo es un clic, y definir "activa" con
+// excepciones produce una regla que nadie recuerda (ver 012-ordenes-compra.md, supuesto #25).
+test('una orden en borrador tambien bloquea el borrado del proveedor', function () {
+    $user = User::factory()->create();
+    $proveedor = Proveedor::factory()->for($user)->create();
+
+    OrdenCompra::factory()->for($user)->for($proveedor)->create(['estado' => EstadoOrdenCompra::Borrador->value]);
+
+    $this->actingAs($user)
+        ->deleteJson("/api/v1/proveedores/{$proveedor->id}")
+        ->assertStatus(409);
 });

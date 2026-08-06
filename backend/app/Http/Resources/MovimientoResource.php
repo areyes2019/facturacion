@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Models\CotizacionPago;
+use App\Models\OrdenCompra;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -36,8 +37,8 @@ class MovimientoResource extends JsonResource
 
     /**
      * Documento que originó el movimiento, en la forma mínima que el frontend necesita para
-     * enlazarlo. Hoy solo existe `CotizacionPago`; futuros módulos se agregan aquí sin tocar el
-     * modelo ni la migración (ver 010-tesoreria.md).
+     * enlazarlo: un `CotizacionPago` (ingreso, 010) o una `OrdenCompra` pagada (egreso, 012).
+     * Futuros módulos se agregan aquí sin tocar el modelo ni la migración.
      *
      * @return array{tipo: string, etiqueta: string, ruta: string, id: int}|null
      */
@@ -53,6 +54,15 @@ class MovimientoResource extends JsonResource
                 'etiqueta' => 'COT-'.str_pad((string) $cotizacion->folio, 5, '0', STR_PAD_LEFT),
                 'ruta' => 'cotizaciones-detalle',
                 'id' => $cotizacion->id,
+            ];
+        }
+
+        if ($documento instanceof OrdenCompra) {
+            return [
+                'tipo' => 'orden_compra',
+                'etiqueta' => $documento->folioFormateado(),
+                'ruta' => 'ordenes-compra-detalle',
+                'id' => $documento->id,
             ];
         }
 

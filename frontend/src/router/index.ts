@@ -156,6 +156,30 @@ const router = createRouter({
       component: () => import('../views/CotizacionDetalleView.vue'),
       meta: { requiresAuth: true },
     },
+    {
+      path: '/ordenes-compra',
+      name: 'ordenes-compra',
+      component: () => import('../views/OrdenesCompraListView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/ordenes-compra/crear',
+      name: 'ordenes-compra-crear',
+      component: () => import('../views/OrdenCompraFormView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/ordenes-compra/:id/editar',
+      name: 'ordenes-compra-editar',
+      component: () => import('../views/OrdenCompraFormView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/ordenes-compra/:id',
+      name: 'ordenes-compra-detalle',
+      component: () => import('../views/OrdenCompraDetalleView.vue'),
+      meta: { requiresAuth: true },
+    },
     // Tesorería: el nombre técnico del módulo y sus rutas siguen siendo "tesoreria"; solo la
     // etiqueta del menú dice "Contabilidad" (ver 010-tesoreria.md).
     {

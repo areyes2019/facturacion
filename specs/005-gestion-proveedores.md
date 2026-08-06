@@ -133,6 +133,11 @@ Implementada el 2026-07-31.
   confirmación (`errorEliminar`, mostrado con `Alert`) en vez de cerrarlo como si fuera éxito;
   cubierto por el test de backend, no verificable end-to-end en el navegador en esta historia porque
   el campo no es editable desde la UI (tal como anticipaba el criterio de aceptación 10 del spec).
+- **`tiene_ordenes_activas` dejó de ser una columna el 2026-08-05**: al implementar
+  [Órdenes de compra](012-ordenes-compra.md), la columna se eliminó y el dato pasó a **derivarse por
+  consulta** (existe al menos una orden del proveedor en estado distinto de `recibida`). El campo que
+  expone `ProveedorResource` y el `409` del `DELETE` con su mensaje no cambiaron; lo descrito arriba
+  sobre el default en el modelo y la columna en base de datos ya no aplica.
 - **Verificación end-to-end**: la suite Pest (17 tests del módulo Proveedores, 37 en total del
   proyecto) pasa. Se corrieron además `php artisan serve` y `npm run dev` reales contra MySQL, y se
   probó el flujo HTTP completo (login vía cookie de sesión + CSRF de Sanctum, crear con teléfono sin

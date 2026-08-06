@@ -2,14 +2,14 @@
 
 namespace App\Mail;
 
-use App\Models\Cotizacion;
+use App\Models\OrdenCompra;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 
-class CotizacionEnviadaMail extends DocumentoEnviadoMail
+class OrdenCompraEnviadaMail extends DocumentoEnviadoMail
 {
     public function __construct(
-        public readonly Cotizacion $cotizacion,
+        public readonly OrdenCompra $ordenCompra,
         string $pdf,
     ) {
         parent::__construct($pdf);
@@ -18,17 +18,17 @@ class CotizacionEnviadaMail extends DocumentoEnviadoMail
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: 'Cotización '.$this->cotizacion->folio,
+            subject: 'Orden de compra '.$this->ordenCompra->folioFormateado(),
         );
     }
 
     public function content(): Content
     {
-        return new Content(markdown: 'mail.cotizacion-enviada');
+        return new Content(markdown: 'mail.orden-compra-enviada');
     }
 
     protected function nombreArchivoPdf(): string
     {
-        return $this->cotizacion->nombreArchivoPdf();
+        return $this->ordenCompra->nombreArchivoPdf();
     }
 }

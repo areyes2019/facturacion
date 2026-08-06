@@ -2,14 +2,18 @@
 
 namespace App\Models;
 
+use App\Contracts\DocumentoEnviable;
 use App\Enums\EstadoCotizacion;
 use App\Enums\TipoDescuento;
+use App\Mail\CotizacionEnviadaMail;
 use Database\Factories\CotizacionFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Mail\Mailable;
+use Illuminate\Support\Facades\URL;
 
 #[Fillable([
     'cliente_id',
@@ -25,12 +29,15 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'total',
     'factura_id',
 ])]
-class Cotizacion extends Model
+class Cotizacion extends Model implements DocumentoEnviable
 {
     /** @use HasFactory<CotizacionFactory> */
     use HasFactory;
 
     protected $table = 'cotizaciones';
+
+    /** Vigencia de la URL firmada que Twilio usa para descargar el PDF adjunto. */
+    private const MINUTOS_URL_PUBLICA = 10;
 
     public function user(): BelongsTo
     {
@@ -65,6 +72,45 @@ class Cotizacion extends Model
     public function totalPagado(): float
     {
         return (float) $this->pagos()->sum('monto');
+    }
+
+    public function vistaPdf(): string
+    {
+        return 'pdf.cotizacion';
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function datosPdf(): array
+    {
+        $this->loadMissing(['cliente', 'lineas.articulo']);
+
+        return ['cotizacion' => $this];
+    }
+
+    public function nombreArchivoPdf(): string
+    {
+        return 'cotizacion-'.$this->folio.'.pdf';
+    }
+
+    public function mailable(string $pdf): Mailable
+    {
+        return new CotizacionEnviadaMail($this, $pdf);
+    }
+
+    public function resumenWhatsApp(): string
+    {
+        return "Cotización {$this->folio} por un total de $".number_format((float) $this->total, 2).' MXN.';
+    }
+
+    public function urlPdfPublico(): string
+    {
+        return URL::temporarySignedRoute(
+            'cotizaciones.pdf-publico',
+            now()->addMinutes(self::MINUTOS_URL_PUBLICA),
+            ['cotizacion' => $this->id],
+        );
     }
 
     /**

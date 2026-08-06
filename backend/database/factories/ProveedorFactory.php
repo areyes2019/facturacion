@@ -26,7 +26,6 @@ class ProveedorFactory extends Factory
             'correo' => $this->faker->optional()->companyEmail(),
             'telefono' => $this->faker->optional()->passthrough('+52'.$this->faker->numerify('##########')),
             'rfc' => $this->faker->optional()->passthrough((new RfcFaker)->mexicanRfcMoral()),
-            'tiene_ordenes_activas' => false,
         ];
     }
 }
