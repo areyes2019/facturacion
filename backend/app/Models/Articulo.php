@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\ObjetoImpuesto;
+use App\Enums\TamanoGoma;
 use App\Services\PrecioArticuloCalculator;
 use Database\Factories\ArticuloFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -21,6 +22,8 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'objeto_imp',
     'precio_proveedor',
     'utilidad_porcentaje',
+    'tamano_goma',
+    'costo_goma',
     'costo_con_descuento',
     'precio_unitario_sin_iva',
 ])]
@@ -53,15 +56,32 @@ class Articulo extends Model
     }
 
     /**
-     * Utilidad en pesos por unidad (sin IVA): precio de venta − costo con descuento. No se
-     * persiste; es una resta de dos columnas (ver 011-precio-proveedor-utilidad.md).
+     * Costo total por unidad (sin IVA): costo del aparato ya con descuento + costo de la goma.
+     *
+     * No se persiste: es la suma de dos columnas, mismo criterio por el que tampoco se persiste la
+     * utilidad (ver 014-costo-elaboracion-goma.md). Ordenar por él se traduce a un ORDER BY sobre
+     * la expresión.
+     */
+    protected function costoTotal(): Attribute
+    {
+        return Attribute::make(
+            get: fn (): float => PrecioArticuloCalculator::costoTotal(
+                (float) $this->costo_con_descuento,
+                (float) $this->costo_goma,
+            ),
+        );
+    }
+
+    /**
+     * Utilidad en pesos por unidad (sin IVA): precio de venta − costo total. No se persiste; es una
+     * resta de dos valores derivados (ver 011-precio-proveedor-utilidad.md).
      */
     protected function utilidad(): Attribute
     {
         return Attribute::make(
             get: fn (): float => PrecioArticuloCalculator::utilidad(
                 (float) $this->precio_unitario_sin_iva,
-                (float) $this->costo_con_descuento,
+                $this->costo_total,
             ),
         );
     }
@@ -73,8 +93,10 @@ class Articulo extends Model
     {
         return [
             'objeto_imp' => ObjetoImpuesto::class,
+            'tamano_goma' => TamanoGoma::class,
             'precio_proveedor' => 'decimal:2',
             'utilidad_porcentaje' => 'decimal:2',
+            'costo_goma' => 'decimal:2',
             'costo_con_descuento' => 'decimal:2',
             'precio_unitario_sin_iva' => 'decimal:2',
         ];

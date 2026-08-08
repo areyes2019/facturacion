@@ -3,9 +3,11 @@
 namespace Database\Factories;
 
 use App\Enums\ObjetoImpuesto;
+use App\Enums\TamanoGoma;
 use App\Models\Articulo;
 use App\Models\Catalogo;
 use App\Models\User;
+use App\Services\PrecioArticuloCalculator;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -36,8 +38,30 @@ class ArticuloFactory extends Factory
             'objeto_imp' => ObjetoImpuesto::SiObjeto,
             'precio_proveedor' => $precio,
             'utilidad_porcentaje' => null,
+            'tamano_goma' => null,
+            'costo_goma' => 0,
             'costo_con_descuento' => $precio,
             'precio_unitario_sin_iva' => $precio,
         ];
+    }
+
+    /**
+     * Artículo que requiere elaboración de goma (ver 014-costo-elaboracion-goma.md).
+     *
+     * Deriva `costo_goma` y el precio de venta a partir del costo recibido, bajo el mismo supuesto
+     * que `definition()`: catálogo con 0% de descuento y 0% de utilidad. Un test con otro catálogo
+     * sobreescribe los campos derivados explícitamente.
+     */
+    public function conGoma(TamanoGoma $tamano, float $costoGoma): static
+    {
+        return $this->state(function (array $atributos) use ($tamano, $costoGoma) {
+            $costo = PrecioArticuloCalculator::costoTotal((float) $atributos['costo_con_descuento'], $costoGoma);
+
+            return [
+                'tamano_goma' => $tamano,
+                'costo_goma' => $costoGoma,
+                'precio_unitario_sin_iva' => PrecioArticuloCalculator::precioVentaSinIva($costo, 0.0),
+            ];
+        });
     }
 }

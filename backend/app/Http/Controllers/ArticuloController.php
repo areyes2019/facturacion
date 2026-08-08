@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\ObjetoImpuesto;
+use App\Enums\TamanoGoma;
 use App\Http\Requests\Articulos\StoreArticuloRequest;
 use App\Http\Requests\Articulos\UpdateArticuloRequest;
 use App\Http\Resources\ArticuloResource;
@@ -10,6 +11,7 @@ use App\Models\Articulo;
 use App\Models\Catalogo;
 use App\Rules\ClaveProdServValido;
 use App\Rules\ClaveUnidadValido;
+use App\Services\ConfiguracionService;
 use App\Services\PrecioArticuloCalculator;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -22,7 +24,12 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ArticuloController extends Controller
 {
-    /** Columnas compartidas entre la importación y la exportación CSV (ver 006-gestion-articulos.md). */
+    /**
+     * Columnas compartidas entre la importación y la exportación CSV (ver 006-gestion-articulos.md).
+     *
+     * `tamano_goma` va al final para que un CSV de 7 columnas de 011 siga siendo importable sin
+     * cambios (ver 014-costo-elaboracion-goma.md).
+     */
     private const COLUMNAS_CSV = [
         'nombre',
         'modelo',
@@ -31,16 +38,18 @@ class ArticuloController extends Controller
         'objeto_imp',
         'precio_proveedor',
         'utilidad_porcentaje',
+        'tamano_goma',
     ];
 
     /**
-     * Columnas numéricas ordenables del listado (ver 011-precio-proveedor-utilidad.md). La utilidad
-     * no está persistida, así que se ordena por la expresión que la define.
+     * Columnas numéricas ordenables del listado (ver 011-precio-proveedor-utilidad.md). Ni el costo
+     * total ni la utilidad están persistidos, así que se ordena por la expresión que los define
+     * (ver 014-costo-elaboracion-goma.md).
      */
     private const ORDENACIONES = [
-        'costo_con_descuento' => 'costo_con_descuento',
+        'costo_total' => 'costo_con_descuento + costo_goma',
         'precio_unitario_sin_iva' => 'precio_unitario_sin_iva',
-        'utilidad' => 'precio_unitario_sin_iva - costo_con_descuento',
+        'utilidad' => 'precio_unitario_sin_iva - (costo_con_descuento + costo_goma)',
     ];
 
     /**
@@ -63,15 +72,18 @@ class ArticuloController extends Controller
     {
         $datos = $request->validated();
         $catalogo = Catalogo::findOrFail($datos['catalogo_id']);
+        $costoGoma = $this->costoGomaDe($request, $datos);
 
         $cadena = PrecioArticuloCalculator::calcularCadena(
             (float) $datos['precio_proveedor'],
             (float) $catalogo->descuento,
             (float) ($datos['utilidad_porcentaje'] ?? $catalogo->utilidad_porcentaje),
+            $costoGoma,
         );
 
         $articulo = $request->user()->articulos()->create([
             ...$datos,
+            'costo_goma' => $costoGoma,
             'costo_con_descuento' => $cadena['costo_con_descuento'],
             'precio_unitario_sin_iva' => $cadena['precio_unitario_sin_iva'],
         ]);
@@ -98,15 +110,18 @@ class ArticuloController extends Controller
 
         $datos = $request->validated();
         $catalogo = Catalogo::findOrFail($datos['catalogo_id']);
+        $costoGoma = $this->costoGomaDe($request, $datos);
 
         $cadena = PrecioArticuloCalculator::calcularCadena(
             (float) $datos['precio_proveedor'],
             (float) $catalogo->descuento,
             (float) ($datos['utilidad_porcentaje'] ?? $catalogo->utilidad_porcentaje),
+            $costoGoma,
         );
 
         $articulo->update([
             ...$datos,
+            'costo_goma' => $costoGoma,
             'costo_con_descuento' => $cadena['costo_con_descuento'],
             'precio_unitario_sin_iva' => $cadena['precio_unitario_sin_iva'],
         ]);
@@ -163,6 +178,11 @@ class ArticuloController extends Controller
             // null antes de validar para que la regla `nullable` la deje pasar.
             $utilidad = trim((string) ($datos['utilidad_porcentaje'] ?? ''));
 
+            // Celda de tamaño vacía = el artículo no lleva goma (ver 014). Se acepta con cualquier
+            // combinación de mayúsculas y espacios alrededor: "Grande ", "GRANDE" y "grande" son la
+            // misma categoría.
+            $tamano = strtolower(trim((string) ($datos['tamano_goma'] ?? '')));
+
             $validator = Validator::make(
                 [
                     'nombre' => trim((string) ($datos['nombre'] ?? '')),
@@ -172,6 +192,7 @@ class ArticuloController extends Controller
                     'objeto_imp' => trim((string) ($datos['objeto_imp'] ?? '')),
                     'precio_proveedor' => trim((string) ($datos['precio_proveedor'] ?? '')),
                     'utilidad_porcentaje' => $utilidad === '' ? null : $utilidad,
+                    'tamano_goma' => $tamano === '' ? null : $tamano,
                 ],
                 [
                     'nombre' => [
@@ -188,6 +209,7 @@ class ArticuloController extends Controller
                     'objeto_imp' => ['required', Rule::enum(ObjetoImpuesto::class)],
                     'precio_proveedor' => ['required', 'numeric', 'gt:0', 'decimal:0,2'],
                     'utilidad_porcentaje' => ['nullable', 'numeric', 'gte:0', 'lte:999.99', 'decimal:0,2'],
+                    'tamano_goma' => ['nullable', Rule::enum(TamanoGoma::class)],
                 ],
             );
 
@@ -198,16 +220,19 @@ class ArticuloController extends Controller
             }
 
             $filaValidada = $validator->validated();
+            $costoGoma = $this->costoGomaDe($request, $filaValidada);
 
             $cadena = PrecioArticuloCalculator::calcularCadena(
                 (float) $filaValidada['precio_proveedor'],
                 (float) $catalogo->descuento,
                 (float) ($filaValidada['utilidad_porcentaje'] ?? $catalogo->utilidad_porcentaje),
+                $costoGoma,
             );
 
             $request->user()->articulos()->create([
                 ...$filaValidada,
                 'catalogo_id' => $catalogo->id,
+                'costo_goma' => $costoGoma,
                 'costo_con_descuento' => $cadena['costo_con_descuento'],
                 'precio_unitario_sin_iva' => $cadena['precio_unitario_sin_iva'],
             ]);
@@ -243,11 +268,33 @@ class ArticuloController extends Controller
                     // Celda vacía cuando el artículo hereda el porcentaje del catálogo, para que el
                     // archivo exportado sea reimportable conservando la herencia (ver 011).
                     $articulo->utilidad_porcentaje,
+                    // Celda vacía cuando el artículo no lleva goma (ver 014). El costo no viaja:
+                    // es configuración global, no un dato del artículo.
+                    $articulo->tamano_goma?->value,
                 ]);
             }
 
             fclose($handle);
         }, 'articulos.csv', ['Content-Type' => 'text/csv']);
+    }
+
+    /**
+     * Costo vigente de la goma del tamaño capturado, o 0 si el artículo no lleva goma.
+     *
+     * Se congela como copia en la ficha del artículo (ver 014-costo-elaboracion-goma.md): sin un
+     * valor guardado no habría nada que recalcular al cambiar el ajuste, ni nada que confirmar
+     * antes de mover precios, ni columna real por la que ordenar el listado.
+     *
+     * @param  array<string, mixed>  $datos
+     */
+    private function costoGomaDe(Request $request, array $datos): float
+    {
+        $tamano = $datos['tamano_goma'] ?? null;
+
+        return app(ConfiguracionService::class)->costoGoma(
+            $request->user(),
+            $tamano instanceof TamanoGoma ? $tamano : TamanoGoma::tryFrom((string) $tamano),
+        );
     }
 
     /**

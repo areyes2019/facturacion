@@ -73,7 +73,8 @@ class CatalogoProveedorController extends Controller
         $descuento = (float) $request->input('descuento');
         $utilidad = (float) $request->input('utilidad_porcentaje');
 
-        $articulos = $catalogo->articulos()->get(['id', 'nombre', 'modelo', 'precio_proveedor', 'utilidad_porcentaje']);
+        $articulos = $catalogo->articulos()
+            ->get(['id', 'nombre', 'modelo', 'precio_proveedor', 'utilidad_porcentaje', 'costo_goma']);
 
         $impacto = $articulos->map(function ($articulo) use ($descuento, $utilidad) {
             $utilidadEfectiva = $articulo->utilidad_porcentaje ?? $utilidad;
@@ -81,6 +82,7 @@ class CatalogoProveedorController extends Controller
                 (float) $articulo->precio_proveedor,
                 $descuento,
                 (float) $utilidadEfectiva,
+                (float) $articulo->costo_goma,
             );
 
             return [
@@ -88,6 +90,7 @@ class CatalogoProveedorController extends Controller
                 'nombre' => $articulo->nombre,
                 'modelo' => $articulo->modelo,
                 'costo_con_descuento' => $cadena['costo_con_descuento'],
+                'costo_total' => $cadena['costo_total'],
                 'precio_unitario_sin_iva' => $cadena['precio_unitario_sin_iva'],
             ];
         });

@@ -4,6 +4,7 @@ use App\Http\Controllers\ArticuloController;
 use App\Http\Controllers\CatalogoController;
 use App\Http\Controllers\CatalogoProveedorController;
 use App\Http\Controllers\ClienteController;
+use App\Http\Controllers\ConfiguracionController;
 use App\Http\Controllers\CotizacionController;
 use App\Http\Controllers\CuentaController;
 use App\Http\Controllers\FacturaController;
@@ -37,6 +38,12 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
     Route::get('articulos/exportar-csv', [ArticuloController::class, 'exportarCsv']);
     Route::apiResource('articulos', ArticuloController::class);
+
+    // Pizarrón de ajustes globales del usuario (ver 014-costo-elaboracion-goma.md). La ruta de
+    // impacto va antes del GET base para que no la capture ninguna ruta más general.
+    Route::get('configuracion/impacto-precios', [ConfiguracionController::class, 'impactoPrecios']);
+    Route::get('configuracion', [ConfiguracionController::class, 'index']);
+    Route::put('configuracion', [ConfiguracionController::class, 'update']);
 
     // Prefijo "catalogos-proveedor" (no "catalogos") para no chocar con el grupo de catálogos SAT
     // de referencia registrado más abajo bajo /catalogos (ver 009-catalogos.md).

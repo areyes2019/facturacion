@@ -3,7 +3,9 @@ import {
   ArrowsRightLeftIcon,
   BanknotesIcon,
   ChartBarIcon,
+  ArrowRightStartOnRectangleIcon,
   ClipboardDocumentListIcon,
+  Cog6ToothIcon,
   CubeIcon,
   DocumentDuplicateIcon,
   DocumentTextIcon,
@@ -12,6 +14,7 @@ import {
   ShoppingCartIcon,
   TagIcon,
   TruckIcon,
+  UserCircleIcon,
   UsersIcon,
   WalletIcon,
 } from '@heroicons/vue/24/outline'
@@ -20,8 +23,11 @@ import {
  * Definición declarativa de la navegación principal (spec 013).
  *
  * Esta es la única fuente de verdad del menú: `AppLayout.vue` solo la recorre.
- * Toda funcionalidad nueva que necesite entrada de menú se agrega acá, dentro
- * del grupo que le corresponda — no como un enlace suelto en el header.
+ * Toda funcionalidad nueva que necesite entrada de menú se agrega acá — no como
+ * un enlace suelto en el header. El reparto sigue el flujo comercial:
+ *
+ *   - Pantallas de negocio  → uno de los cuatro grupos de la barra.
+ *   - Pantallas de configuración del sistema o de la cuenta → menú de usuario.
  */
 
 export interface OpcionNavegacion {
@@ -130,6 +136,23 @@ export const gruposNavegacion: GrupoNavegacion[] = [
     ],
   },
 ]
+
+/**
+ * Opciones del menú de usuario, al extremo derecho de la barra.
+ *
+ * No son un quinto grupo: los cuatro grupos son el flujo comercial del negocio
+ * y la configuración del sistema no lo es. Aquí caen también las pantallas de
+ * cuenta (perfil, contraseña) cuando existan.
+ */
+export const opcionesMenuUsuario: OpcionNavegacion[] = [
+  { name: 'configuracion', etiqueta: 'Configuración', icono: Cog6ToothIcon },
+]
+
+/** Ícono de la acción de cerrar sesión, última entrada del menú de usuario. */
+export const iconoCerrarSesion = ArrowRightStartOnRectangleIcon
+
+/** Ícono del disparador del menú de usuario, y su reemplazo por debajo de `sm`. */
+export const iconoUsuario = UserCircleIcon
 
 /** Todos los `name` de ruta que mantienen resaltada a una opción. */
 export function nombresDeRutaDeOpcion(opcion: OpcionNavegacion): string[] {

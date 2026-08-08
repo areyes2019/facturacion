@@ -68,15 +68,23 @@ class Catalogo extends Model
             $utilidad = (float) $catalogo->utilidad_porcentaje;
 
             // Un cambio de descuento mueve el precio de TODOS los artículos del catálogo, incluidos
-            // los que tienen porcentaje propio, porque cambia el costo del que parten.
+            // los que tienen porcentaje propio, porque cambia el costo del que parten. El costo de
+            // goma no lo toca el descuento (ver 014-costo-elaboracion-goma.md), pero sí entra en el
+            // costo total del que se calcula el precio.
             if ($catalogo->wasChanged('descuento')) {
                 foreach ($catalogo->articulos()->get() as $articulo) {
                     $utilidadEfectiva = (float) ($articulo->utilidad_porcentaje ?? $utilidad);
-                    $articulo->update(PrecioArticuloCalculator::calcularCadena(
+                    $cadena = PrecioArticuloCalculator::calcularCadena(
                         (float) $articulo->precio_proveedor,
                         $descuento,
                         $utilidadEfectiva,
-                    ));
+                        (float) $articulo->costo_goma,
+                    );
+
+                    $articulo->update([
+                        'costo_con_descuento' => $cadena['costo_con_descuento'],
+                        'precio_unitario_sin_iva' => $cadena['precio_unitario_sin_iva'],
+                    ]);
                 }
             }
 
@@ -87,7 +95,7 @@ class Catalogo extends Model
                 foreach ($catalogo->articulos()->whereNull('utilidad_porcentaje')->get() as $articulo) {
                     $articulo->update([
                         'precio_unitario_sin_iva' => PrecioArticuloCalculator::precioVentaSinIva(
-                            (float) $articulo->costo_con_descuento,
+                            $articulo->costo_total,
                             $utilidad,
                         ),
                     ]);

@@ -6,16 +6,24 @@ use App\Models\Articulo;
 use App\Models\Catalogo;
 
 /**
- * Cadena de cálculo de precios de un artículo (ver 011-precio-proveedor-utilidad.md).
+ * Cadena de cálculo de precios de un artículo (ver 011-precio-proveedor-utilidad.md y
+ * 014-costo-elaboracion-goma.md).
  *
  *   precio_proveedor          (capturado)              $200.00
  *     ↓ × (1 − descuento / 100)                        descuento del catálogo
- *   costo_con_descuento       (calculado, persistido)  $180.00
+ *   costo_con_descuento       (calculado, persistido)  $200.00   ← costo del aparato
+ *     ↓ + costo_goma                                   goma mediana
+ *   costo_total               (calculado al leer)      $210.00
  *     ↓ × (1 + utilidad_efectiva / 100)                markup sobre el costo
- *   precio_unitario_sin_iva   (calculado, persistido)  $225.00
+ *   precio_unitario_sin_iva   (calculado, persistido)  $262.50
  *
  * El porcentaje se interpreta como markup sobre el costo: un 25% significa "quiero ganar el 25% de
  * lo que me costó", de ahí la multiplicación.
+ *
+ * El costo de goma entra DESPUÉS del descuento (el descuento es un beneficio de compra sobre lo que
+ * le pagas al proveedor; la goma la elaboras tú) y ANTES del markup (el precio de venta siempre es
+ * calculado, así que un costo que no entrara al markup solo produciría un precio insuficiente).
+ * Un artículo sin goma tiene costo_goma = 0 y la cadena queda idéntica a la de 011.
  *
  * Los casos frontera de esta cadena viven en shared/fixtures/precios-articulos.json, compartidos
  * con la implementación espejo en TypeScript (frontend/src/lib/precioArticulo.ts).
@@ -59,19 +67,34 @@ class PrecioArticuloCalculator
     }
 
     /**
-     * Precio de venta sin IVA = techo2(costo_con_descuento × (1 + utilidad_efectiva / 100)).
+     * Costo total = redondeo2(costo_con_descuento + costo_goma).
+     *
+     * Los dos sumandos ya vienen con 2 decimales, así que el redondeo no cambia ningún valor de
+     * negocio; está para que la suma en punto flotante no arrastre una cola de error hacia el
+     * techo2 del markup, que es sensible al último centavo.
      */
-    public static function precioVentaSinIva(float $costoConDescuento, float $utilidadPorcentaje): float
+    public static function costoTotal(float $costoConDescuento, float $costoGoma): float
     {
-        return self::techo2($costoConDescuento * (1 + $utilidadPorcentaje / 100));
+        return self::redondeo2($costoConDescuento + $costoGoma);
     }
 
     /**
-     * Utilidad en pesos = precio_unitario_sin_iva − costo_con_descuento (siempre sin IVA).
+     * Precio de venta sin IVA = techo2(costo_total × (1 + utilidad_efectiva / 100)).
      */
-    public static function utilidad(float $precioVentaSinIva, float $costoConDescuento): float
+    public static function precioVentaSinIva(float $costoTotal, float $utilidadPorcentaje): float
     {
-        return round($precioVentaSinIva - $costoConDescuento, 2);
+        return self::techo2($costoTotal * (1 + $utilidadPorcentaje / 100));
+    }
+
+    /**
+     * Utilidad en pesos = precio_unitario_sin_iva − costo_total (siempre sin IVA).
+     *
+     * Se mide contra el costo total, no contra el del aparato: es lo que impide que un artículo con
+     * goma muestre una utilidad que ignora ese costo.
+     */
+    public static function utilidad(float $precioVentaSinIva, float $costoTotal): float
+    {
+        return round($precioVentaSinIva - $costoTotal, 2);
     }
 
     /**
@@ -83,17 +106,26 @@ class PrecioArticuloCalculator
     }
 
     /**
-     * Calcula y devuelve los valores derivados de la cadena para un artículo dado su catálogo.
+     * Calcula y devuelve los valores derivados de la cadena.
      *
-     * @return array{costo_con_descuento: float, precio_unitario_sin_iva: float}
+     * `costo_total` viaja en el resultado por comodidad de quien calcula, pero NO se persiste: es la
+     * suma de dos columnas, mismo criterio por el que tampoco se persiste la utilidad.
+     *
+     * @return array{costo_con_descuento: float, costo_total: float, precio_unitario_sin_iva: float}
      */
-    public static function calcularCadena(float $precioProveedor, float $descuento, float $utilidadPorcentaje): array
-    {
+    public static function calcularCadena(
+        float $precioProveedor,
+        float $descuento,
+        float $utilidadPorcentaje,
+        float $costoGoma = 0.0,
+    ): array {
         $costo = self::costoConDescuento($precioProveedor, $descuento);
-        $precioVenta = self::precioVentaSinIva($costo, $utilidadPorcentaje);
+        $costoTotal = self::costoTotal($costo, $costoGoma);
+        $precioVenta = self::precioVentaSinIva($costoTotal, $utilidadPorcentaje);
 
         return [
             'costo_con_descuento' => $costo,
+            'costo_total' => $costoTotal,
             'precio_unitario_sin_iva' => $precioVenta,
         ];
     }

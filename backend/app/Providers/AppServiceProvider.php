@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Services\ConfiguracionService;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Support\ServiceProvider;
 use PhpCfdi\SatCatalogos\Factory as SatCatalogosFactory;
@@ -19,6 +20,10 @@ class AppServiceProvider extends ServiceProvider
 
             return (new SatCatalogosFactory)->catalogosFromDsn($dsn);
         });
+
+        // Singleton para que la memoización de los ajustes del usuario dure toda la petición
+        // (ver 014-costo-elaboracion-goma.md).
+        $this->app->singleton(ConfiguracionService::class);
     }
 
     /**

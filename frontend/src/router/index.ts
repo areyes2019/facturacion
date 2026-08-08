@@ -212,6 +212,15 @@ const router = createRouter({
       component: () => import('../views/SaldosView.vue'),
       meta: { requiresAuth: true },
     },
+    {
+      // Pantalla de ajustes globales, alcanzable desde el menú de usuario (ver 013 y 014).
+      // Es una sola pantalla con secciones: la tasa de IVA, los datos fiscales y los folios
+      // entrarán como secciones hermanas, sin URL nueva.
+      path: '/configuracion',
+      name: 'configuracion',
+      component: () => import('../views/ConfiguracionView.vue'),
+      meta: { requiresAuth: true },
+    },
     ...(import.meta.env.DEV
       ? [
           {

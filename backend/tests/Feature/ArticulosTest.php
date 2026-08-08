@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\TamanoGoma;
 use App\Models\Articulo;
 use App\Models\Catalogo;
 use App\Models\Proveedor;
@@ -522,7 +523,7 @@ test('el listado ordena por las columnas numericas en ambas direcciones', functi
     $desc->assertOk();
     expect(collect($desc->json('data'))->pluck('nombre')->all())->toBe(array_reverse($ascendente));
 })->with([
-    'costo con descuento' => ['costo_con_descuento', ['Barato', 'Rentable', 'Caro']],
+    'costo total' => ['costo_total', ['Barato', 'Rentable', 'Caro']],
     'precio de venta' => ['precio_unitario_sin_iva', ['Barato', 'Caro', 'Rentable']],
     'utilidad' => ['utilidad', ['Barato', 'Caro', 'Rentable']],
 ]);
@@ -537,4 +538,239 @@ test('un sort no reconocido se ignora y el listado cae al orden por nombre', fun
 
     $response->assertOk();
     expect(collect($response->json('data'))->pluck('nombre')->all())->toBe(['Alfa', 'Zeta']);
+});
+
+test('la clave de orden retirada costo_con_descuento cae al orden por nombre', function () {
+    // Se retiró en favor de costo_total, que es lo que muestra el listado
+    // (ver 014-costo-elaboracion-goma.md). Degrada sin error, como cualquier sort no reconocido.
+    $user = User::factory()->create();
+    $catalogo = Catalogo::factory()->for($user)->create();
+    Articulo::factory()->for($user)->for($catalogo)->create(['nombre' => 'Zeta', 'costo_con_descuento' => 10]);
+    Articulo::factory()->for($user)->for($catalogo)->create(['nombre' => 'Alfa', 'costo_con_descuento' => 99]);
+
+    $response = $this->actingAs($user)->getJson('/api/v1/articulos?sort=costo_con_descuento&direction=asc');
+
+    $response->assertOk();
+    expect(collect($response->json('data'))->pluck('nombre')->all())->toBe(['Alfa', 'Zeta']);
+});
+
+test('el listado ordena por costo total y no por el costo del aparato', function () {
+    $user = User::factory()->create();
+    $catalogo = Catalogo::factory()->for($user)->create(['descuento' => 0, 'utilidad_porcentaje' => 0]);
+
+    // Un aparato barato con goma grande supera en costo total a un aparato más caro sin goma.
+    Articulo::factory()->for($user)->for($catalogo)->conGoma(TamanoGoma::Grande, 20.0)->create([
+        'nombre' => 'Sello chico con goma grande', 'precio_proveedor' => 100, 'costo_con_descuento' => 100,
+    ]);
+    Articulo::factory()->for($user)->for($catalogo)->create([
+        'nombre' => 'Aparato sin goma', 'precio_proveedor' => 110, 'costo_con_descuento' => 110,
+        'precio_unitario_sin_iva' => 110,
+    ]);
+
+    $response = $this->actingAs($user)->getJson('/api/v1/articulos?sort=costo_total&direction=asc');
+
+    $response->assertOk();
+    expect(collect($response->json('data'))->pluck('nombre')->all())
+        ->toBe(['Aparato sin goma', 'Sello chico con goma grande']);
+});
+
+test('crear un articulo con goma suma el costo vigente antes del markup', function () {
+    $user = User::factory()->create();
+    $catalogo = Catalogo::factory()->for($user)->create(['descuento' => 0, 'utilidad_porcentaje' => 25]);
+
+    $response = $this->actingAs($user)->postJson('/api/v1/articulos', datosArticuloValidos([
+        'catalogo_id' => $catalogo->id,
+        'precio_proveedor' => 200,
+        'tamano_goma' => 'mediana',
+    ]));
+
+    // Cadena de la historia: 200 + 10 = 210, al 25% da 262.50, utilidad 52.50.
+    $response->assertCreated();
+    $response->assertJsonPath('data.tamano_goma', 'mediana');
+    $response->assertJsonPath('data.costo_goma', 10);
+    $response->assertJsonPath('data.costo_con_descuento', 200);
+    $response->assertJsonPath('data.costo_total', 210);
+    $response->assertJsonPath('data.precio_unitario_sin_iva', 262.5);
+    $response->assertJsonPath('data.utilidad', 52.5);
+});
+
+test('el descuento del catalogo no se aplica sobre el costo de la goma', function () {
+    $user = User::factory()->create();
+    $catalogo = Catalogo::factory()->for($user)->create(['descuento' => 55, 'utilidad_porcentaje' => 99]);
+
+    $response = $this->actingAs($user)->postJson('/api/v1/articulos', datosArticuloValidos([
+        'catalogo_id' => $catalogo->id,
+        'precio_proveedor' => 347.27,
+        'tamano_goma' => 'grande',
+    ]));
+
+    // El 55% aplica solo al aparato (347.27 -> 156.27); la goma entra completa (20.00). Si el
+    // descuento tocara el total, el costo sería 158.52 y el precio otro.
+    $response->assertCreated();
+    $response->assertJsonPath('data.costo_con_descuento', 156.27);
+    $response->assertJsonPath('data.costo_total', 176.27);
+    $response->assertJsonPath('data.precio_unitario_sin_iva', 350.78);
+    $response->assertJsonPath('data.utilidad', 174.51);
+});
+
+test('un articulo sin goma conserva la cadena de 011 sin cambios', function () {
+    $user = User::factory()->create();
+    $catalogo = Catalogo::factory()->for($user)->create(['descuento' => 10, 'utilidad_porcentaje' => 25]);
+
+    $response = $this->actingAs($user)->postJson('/api/v1/articulos', datosArticuloValidos([
+        'catalogo_id' => $catalogo->id,
+        'precio_proveedor' => 200,
+    ]));
+
+    $response->assertCreated();
+    $response->assertJsonPath('data.tamano_goma', null);
+    $response->assertJsonPath('data.costo_goma', 0);
+    $response->assertJsonPath('data.costo_con_descuento', 180);
+    $response->assertJsonPath('data.costo_total', 180);
+    $response->assertJsonPath('data.precio_unitario_sin_iva', 225);
+    $response->assertJsonPath('data.utilidad', 45);
+});
+
+test('un tamano de goma no reconocido se rechaza', function () {
+    $user = User::factory()->create();
+    $catalogo = Catalogo::factory()->for($user)->create();
+
+    $this->actingAs($user)->postJson('/api/v1/articulos', datosArticuloValidos([
+        'catalogo_id' => $catalogo->id,
+        'tamano_goma' => 'enorme',
+    ]))->assertStatus(422)->assertJsonValidationErrors('tamano_goma');
+});
+
+test('una cadena vacia de tamano de goma equivale a no llevar goma', function () {
+    $user = User::factory()->create();
+    $catalogo = Catalogo::factory()->for($user)->create(['descuento' => 0, 'utilidad_porcentaje' => 0]);
+
+    $response = $this->actingAs($user)->postJson('/api/v1/articulos', datosArticuloValidos([
+        'catalogo_id' => $catalogo->id,
+        'precio_proveedor' => 100,
+        'tamano_goma' => '',
+    ]));
+
+    $response->assertCreated();
+    $response->assertJsonPath('data.tamano_goma', null);
+    $response->assertJsonPath('data.costo_goma', 0);
+});
+
+test('costo_goma costo_total y utilidad enviados por el cliente se ignoran', function () {
+    $user = User::factory()->create();
+    $catalogo = Catalogo::factory()->for($user)->create(['descuento' => 0, 'utilidad_porcentaje' => 25]);
+
+    $response = $this->actingAs($user)->postJson('/api/v1/articulos', datosArticuloValidos([
+        'catalogo_id' => $catalogo->id,
+        'precio_proveedor' => 200,
+        'tamano_goma' => 'mediana',
+        'costo_goma' => 9999,
+        'costo_total' => 1,
+        'utilidad' => 1,
+    ]));
+
+    $response->assertCreated();
+    $response->assertJsonPath('data.costo_goma', 10);
+    $response->assertJsonPath('data.costo_total', 210);
+    $response->assertJsonPath('data.utilidad', 52.5);
+});
+
+test('cambiar el tamano de goma al editar recalcula costo y precio', function () {
+    $user = User::factory()->create();
+    $catalogo = Catalogo::factory()->for($user)->create(['descuento' => 0, 'utilidad_porcentaje' => 25]);
+    $articulo = Articulo::factory()->for($user)->for($catalogo)->conGoma(TamanoGoma::Chica, 6.0)->create([
+        'precio_proveedor' => 200, 'costo_con_descuento' => 200,
+    ]);
+
+    $response = $this->actingAs($user)->putJson("/api/v1/articulos/{$articulo->id}", datosArticuloValidos([
+        'catalogo_id' => $catalogo->id,
+        'nombre' => $articulo->nombre,
+        'precio_proveedor' => 200,
+        'tamano_goma' => 'grande',
+    ]));
+
+    $response->assertOk();
+    $response->assertJsonPath('data.costo_goma', 20);
+    $response->assertJsonPath('data.costo_total', 220);
+    $response->assertJsonPath('data.precio_unitario_sin_iva', 275);
+});
+
+test('cambiar el descuento del catalogo respeta el costo de la goma', function () {
+    $user = User::factory()->create();
+    $catalogo = Catalogo::factory()->for($user)->create(['descuento' => 0, 'utilidad_porcentaje' => 0]);
+    $articulo = Articulo::factory()->for($user)->for($catalogo)->conGoma(TamanoGoma::Mediana, 10.0)->create([
+        'precio_proveedor' => 200, 'costo_con_descuento' => 200,
+    ]);
+
+    $this->actingAs($user)->putJson("/api/v1/catalogos-proveedor/{$catalogo->id}", [
+        'nombre' => $catalogo->nombre,
+        'descuento' => 10,
+        'utilidad_porcentaje' => 0,
+    ])->assertOk();
+
+    // El descuento baja el aparato a 180; la goma sigue costando 10.
+    $articulo->refresh();
+    expect((float) $articulo->costo_con_descuento)->toBe(180.0);
+    expect((float) $articulo->costo_goma)->toBe(10.0);
+    expect((float) $articulo->precio_unitario_sin_iva)->toBe(190.0);
+});
+
+test('la importacion csv acepta el tamano de goma con mayusculas y espacios', function () {
+    $user = User::factory()->create();
+    $catalogo = Catalogo::factory()->for($user)->create(['descuento' => 0, 'utilidad_porcentaje' => 0]);
+
+    $csv = "nombre,modelo,clave_prod_serv,clave_unidad,objeto_imp,precio_proveedor,utilidad_porcentaje,tamano_goma\n"
+        ."Sello grande,MOD-1,43211503,H87,02,100,,Grande \n"
+        ."Sello sin goma,MOD-2,43211503,H87,02,100,,\n"
+        ."Sello invalido,MOD-3,43211503,H87,02,100,,enorme\n";
+
+    $response = $this->actingAs($user)->postJson(
+        "/api/v1/catalogos-proveedor/{$catalogo->id}/articulos/importar-csv",
+        ['archivo' => UploadedFile::fake()->createWithContent('articulos.csv', $csv)],
+    );
+
+    $response->assertOk();
+    $response->assertJsonPath('importados', 2);
+    $response->assertJsonPath('errores.0.fila', 4);
+
+    $this->assertDatabaseHas('articulos', [
+        'nombre' => 'Sello grande', 'tamano_goma' => 'grande', 'costo_goma' => 20, 'precio_unitario_sin_iva' => 120,
+    ]);
+    $this->assertDatabaseHas('articulos', [
+        'nombre' => 'Sello sin goma', 'tamano_goma' => null, 'costo_goma' => 0, 'precio_unitario_sin_iva' => 100,
+    ]);
+});
+
+test('la exportacion csv trae las 8 columnas y es reimportable sin perder el tamano', function () {
+    $user = User::factory()->create();
+    $catalogo = Catalogo::factory()->for($user)->create(['descuento' => 0, 'utilidad_porcentaje' => 0]);
+
+    Articulo::factory()->for($user)->for($catalogo)->conGoma(TamanoGoma::Mediana, 10.0)->create([
+        'nombre' => 'Con goma', 'precio_proveedor' => 100, 'costo_con_descuento' => 100,
+    ]);
+    Articulo::factory()->for($user)->for($catalogo)->create([
+        'nombre' => 'Sin goma', 'precio_proveedor' => 100, 'costo_con_descuento' => 100,
+        'precio_unitario_sin_iva' => 100,
+    ]);
+
+    $contenido = $this->actingAs($user)->get('/api/v1/articulos/exportar-csv')->streamedContent();
+
+    expect(strtok($contenido, "\n"))->toBe(
+        'nombre,modelo,clave_prod_serv,clave_unidad,objeto_imp,precio_proveedor,utilidad_porcentaje,tamano_goma'
+    );
+
+    $destino = Catalogo::factory()->for($user)->create(['descuento' => 0, 'utilidad_porcentaje' => 0]);
+    $response = $this->actingAs($user)->postJson(
+        "/api/v1/catalogos-proveedor/{$destino->id}/articulos/importar-csv",
+        ['archivo' => UploadedFile::fake()->createWithContent('articulos.csv', $contenido)],
+    );
+
+    $response->assertOk();
+    $response->assertJsonPath('importados', 2);
+    $this->assertDatabaseHas('articulos', [
+        'catalogo_id' => $destino->id, 'nombre' => 'Con goma', 'tamano_goma' => 'mediana', 'costo_goma' => 10,
+    ]);
+    $this->assertDatabaseHas('articulos', [
+        'catalogo_id' => $destino->id, 'nombre' => 'Sin goma', 'tamano_goma' => null, 'costo_goma' => 0,
+    ]);
 });

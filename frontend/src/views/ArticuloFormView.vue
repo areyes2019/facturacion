@@ -3,13 +3,22 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useArticulosStore, type Articulo, type ArticuloPayload } from '../stores/articulos'
 import { useCatalogosStore } from '../stores/catalogos'
+import { useConfiguracionStore } from '../stores/configuracion'
 import { extractErrorMessage, extractFieldErrors } from '../lib/errors'
 import { calcularCadena, precioConIva, redondeo2 } from '../lib/precioArticulo'
+import { etiquetaGoma, TAMANOS_GOMA } from '../lib/tamanoGoma'
 import { Button } from '../components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
 import { Alert, AlertDescription } from '../components/ui/alert'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../components/ui/select'
 import CatalogoSelect from '../components/CatalogoSelect.vue'
 import ClaveProdServCombobox from '../components/ClaveProdServCombobox.vue'
 import ClaveUnidadCombobox from '../components/ClaveUnidadCombobox.vue'
@@ -20,6 +29,7 @@ const route = useRoute()
 const router = useRouter()
 const articulos = useArticulosStore()
 const catalogos = useCatalogosStore()
+const configuracion = useConfiguracionStore()
 
 const articuloId = computed(() => {
   const id = route.params.id
@@ -36,6 +46,8 @@ const form = reactive({
   objeto_imp: null as string | null,
   precio_proveedor: '' as string,
   utilidad_porcentaje: '' as string,
+  // '' = el artículo no lleva goma; es el valor por defecto al crear.
+  tamano_goma: '' as string,
 })
 
 // Descuento y utilidad del catálogo seleccionado, para mostrar los precios en vivo (ver
@@ -74,10 +86,21 @@ const precioProveedor = computed(() => {
   return Number.isFinite(precio) ? precio : 0
 })
 
+// Costo vigente de la goma del tamaño elegido, leído de los ajustes globales (ver
+// 014-costo-elaboracion-goma.md). Sin tamaño no hay goma, y por lo tanto no hay costo que sumar.
+const costoGoma = computed(() => configuracion.costoGoma(form.tamano_goma))
+const llevaGoma = computed(() => form.tamano_goma !== '')
+const etiquetaDeGoma = computed(() => etiquetaGoma(form.tamano_goma))
+
 // Cadena completa calculada con el mismo módulo que espeja al backend (ver
 // 011-precio-proveedor-utilidad.md). Ninguna vista calcula precios por su cuenta.
 const cadena = computed(() =>
-  calcularCadena(precioProveedor.value, descuentoCatalogo.value, utilidadEfectiva.value),
+  calcularCadena(
+    precioProveedor.value,
+    descuentoCatalogo.value,
+    utilidadEfectiva.value,
+    costoGoma.value,
+  ),
 )
 
 const descuentoMonto = computed(() =>
@@ -104,6 +127,12 @@ const erroresPorCampo = ref<Record<string, string>>({})
 const avisoDiscrepancia = ref<string | null>(null)
 
 onMounted(async () => {
+  // Los costos de goma alimentan el resumen en vivo y las etiquetas del selector, así que se
+  // cargan tanto en alta como en edición.
+  if (!configuracion.valores) {
+    await configuracion.fetch().catch(() => undefined)
+  }
+
   if (!articuloId.value) return
 
   cargando.value = true
@@ -118,6 +147,7 @@ onMounted(async () => {
     form.precio_proveedor = articulo.precio_proveedor.toString()
     form.utilidad_porcentaje =
       articulo.utilidad_porcentaje !== null ? articulo.utilidad_porcentaje.toString() : ''
+    form.tamano_goma = articulo.tamano_goma ?? ''
   } catch (err) {
     errorGeneral.value = extractErrorMessage(err)
   } finally {
@@ -135,6 +165,7 @@ function discrepancia(guardado: Articulo): string | null {
 
   if (
     guardado.costo_con_descuento === local.costo_con_descuento &&
+    guardado.costo_total === local.costo_total &&
     guardado.precio_unitario_sin_iva === local.precio_unitario_sin_iva &&
     guardado.utilidad === local.utilidad
   ) {
@@ -143,8 +174,8 @@ function discrepancia(guardado: Articulo): string | null {
 
   return (
     `El precio guardado no coincide con el que mostró este formulario. Quedó registrado un costo ` +
-    `de $${pesos(guardado.costo_con_descuento)} y un precio de venta de ` +
-    `$${pesos(guardado.precio_unitario_sin_iva)}, en lugar de $${pesos(local.costo_con_descuento)} ` +
+    `total de $${pesos(guardado.costo_total)} y un precio de venta de ` +
+    `$${pesos(guardado.precio_unitario_sin_iva)}, en lugar de $${pesos(local.costo_total)} ` +
     `y $${pesos(local.precio_unitario_sin_iva)}. Recarga la página y verifica el artículo.`
   )
 }
@@ -164,6 +195,7 @@ async function onSubmit() {
     objeto_imp: form.objeto_imp,
     precio_proveedor: form.precio_proveedor ? parseFloat(form.precio_proveedor) : null,
     utilidad_porcentaje: form.utilidad_porcentaje ? parseFloat(form.utilidad_porcentaje) : null,
+    tamano_goma: form.tamano_goma || null,
   }
 
   try {
@@ -294,6 +326,35 @@ async function onSubmit() {
               </p>
             </div>
 
+            <div class="space-y-1.5">
+              <Label for="tamano_goma">Tamaño de goma</Label>
+              <!-- El costo vigente va dentro de cada opción: es donde el dato hace falta, al
+                   elegir, no después (ver 014-costo-elaboracion-goma.md). -->
+              <Select v-model="form.tamano_goma">
+                <SelectTrigger id="tamano_goma" class="w-full">
+                  <SelectValue placeholder="Sin goma" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Sin goma</SelectItem>
+                  <SelectItem
+                    v-for="tamano in TAMANOS_GOMA"
+                    :key="tamano.valor"
+                    :value="tamano.valor"
+                  >
+                    {{ tamano.etiqueta }} — ${{ pesos(configuracion.costoGoma(tamano.valor)) }} ({{
+                      tamano.medida.toLowerCase()
+                    }})
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p class="text-muted-foreground text-sm">
+                El costo de la goma se suma al costo del aparato. Se edita en Configuración.
+              </p>
+              <p v-if="erroresPorCampo.tamano_goma" class="text-destructive text-sm">
+                {{ erroresPorCampo.tamano_goma }}
+              </p>
+            </div>
+
             <!-- Resumen de la cadena de cálculo, siempre visible y en vivo (ver 011). -->
             <div class="bg-muted/40 space-y-1.5 rounded-md border p-4">
               <p class="text-foreground text-sm font-medium">Cadena de cálculo</p>
@@ -308,10 +369,24 @@ async function onSubmit() {
                   </dt>
                   <dd class="tabular-nums">−${{ pesos(descuentoMonto) }}</dd>
                 </div>
+                <!-- Sin goma el bloque se ve igual que en 011: no se muestran renglones de $0.00
+                     que solo agregan ruido a la mayoría de los artículos. -->
                 <div class="flex justify-between gap-4 border-t py-0.5 pt-1.5">
-                  <dt class="text-muted-foreground">Costo</dt>
+                  <dt class="text-muted-foreground">
+                    {{ llevaGoma ? 'Costo del aparato' : 'Costo' }}
+                  </dt>
                   <dd class="tabular-nums">${{ pesos(cadena.costo_con_descuento) }}</dd>
                 </div>
+                <template v-if="llevaGoma">
+                  <div class="flex justify-between gap-4 py-0.5">
+                    <dt class="text-muted-foreground">{{ etiquetaDeGoma }}</dt>
+                    <dd class="tabular-nums">+${{ pesos(costoGoma) }}</dd>
+                  </div>
+                  <div class="flex justify-between gap-4 border-t py-0.5 pt-1.5">
+                    <dt class="text-muted-foreground">Costo total</dt>
+                    <dd class="tabular-nums">${{ pesos(cadena.costo_total) }}</dd>
+                  </div>
+                </template>
                 <div class="flex justify-between gap-4 py-0.5">
                   <dt class="text-muted-foreground">Utilidad ({{ utilidadEfectiva }}%)</dt>
                   <dd class="tabular-nums">+${{ pesos(cadena.utilidad) }}</dd>

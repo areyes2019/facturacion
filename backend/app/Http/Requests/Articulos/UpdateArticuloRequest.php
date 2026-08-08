@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Articulos;
 
 use App\Enums\ObjetoImpuesto;
+use App\Enums\TamanoGoma;
 use App\Models\Catalogo;
 use App\Rules\ClaveProdServValido;
 use App\Rules\ClaveUnidadValido;
@@ -27,6 +28,11 @@ class UpdateArticuloRequest extends FormRequest
             'modelo' => is_string($this->modelo) ? trim($this->modelo) : $this->modelo,
             'clave_prod_serv' => is_string($this->clave_prod_serv) ? trim($this->clave_prod_serv) : $this->clave_prod_serv,
             'clave_unidad' => is_string($this->clave_unidad) ? strtoupper(trim($this->clave_unidad)) : $this->clave_unidad,
+            // Un <select> sin selección manda cadena vacía; se normaliza a null para que se
+            // comporte igual que la ausencia del campo (ver 014-costo-elaboracion-goma.md).
+            'tamano_goma' => is_string($this->tamano_goma) && trim($this->tamano_goma) === ''
+                ? null
+                : $this->tamano_goma,
         ]);
     }
 
@@ -68,6 +74,7 @@ class UpdateArticuloRequest extends FormRequest
             'objeto_imp' => ['required', Rule::enum(ObjetoImpuesto::class)],
             'precio_proveedor' => ['required', 'numeric', 'gt:0', 'decimal:0,2'],
             'utilidad_porcentaje' => ['nullable', 'numeric', 'gte:0', 'lte:999.99', 'decimal:0,2'],
+            'tamano_goma' => ['nullable', Rule::enum(TamanoGoma::class)],
         ];
     }
 }

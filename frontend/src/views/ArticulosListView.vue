@@ -65,9 +65,15 @@ function onBuscar() {
   buscarTimeout = setTimeout(() => articulos.fetchList(1), 300)
 }
 
-/** Columnas numéricas ordenables del listado (ver 011-precio-proveedor-utilidad.md). */
+/**
+ * Columnas numéricas ordenables del listado (ver 011-precio-proveedor-utilidad.md).
+ *
+ * "Costo" es el costo total: aparato con descuento + goma. No se agrega columna para el tamaño ni
+ * para el desglose, que viven en el formulario, para no revivir el desborde de tabla corregido en
+ * 006 (ver 014-costo-elaboracion-goma.md).
+ */
 const columnasOrdenables: { clave: ArticuloSort; etiqueta: string }[] = [
-  { clave: 'costo_con_descuento', etiqueta: 'Costo con descuento' },
+  { clave: 'costo_total', etiqueta: 'Costo' },
   { clave: 'precio_unitario_sin_iva', etiqueta: 'Precio de venta' },
   { clave: 'utilidad', etiqueta: 'Utilidad' },
 ]
@@ -238,9 +244,7 @@ async function confirmarImportar() {
                 <TableCell truncate :title="articulo.catalogo_nombre ?? undefined">
                   {{ articulo.catalogo_nombre ?? '—' }}
                 </TableCell>
-                <TableCell class="tabular-nums">
-                  ${{ pesos(articulo.costo_con_descuento) }}
-                </TableCell>
+                <TableCell class="tabular-nums">${{ pesos(articulo.costo_total) }}</TableCell>
                 <TableCell class="tabular-nums">
                   ${{ pesos(articulo.precio_unitario_sin_iva) }}
                 </TableCell>
@@ -322,12 +326,18 @@ async function confirmarImportar() {
             <code
               class="bg-muted block w-full min-w-0 overflow-x-auto rounded-md px-3 py-2 text-xs whitespace-nowrap"
             >
-              nombre,modelo,clave_prod_serv,clave_unidad,objeto_imp,precio_proveedor,utilidad_porcentaje
+              nombre,modelo,clave_prod_serv,clave_unidad,objeto_imp,precio_proveedor,utilidad_porcentaje,tamano_goma
             </code>
 
             <p class="text-muted-foreground text-sm">
               La columna <code>utilidad_porcentaje</code> es opcional: si la celda va vacía, el
               artículo hereda el porcentaje de utilidad del catálogo seleccionado.
+            </p>
+
+            <p class="text-muted-foreground text-sm">
+              La columna <code>tamano_goma</code> también es opcional: acepta <code>chica</code>,
+              <code>mediana</code> o <code>grande</code>, y si la celda va vacía el artículo no
+              lleva goma.
             </p>
 
             <div class="space-y-1.5">

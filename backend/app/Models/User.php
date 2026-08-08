@@ -64,6 +64,11 @@ class User extends Authenticatable
         return $this->hasMany(Movimiento::class);
     }
 
+    public function configuraciones(): HasMany
+    {
+        return $this->hasMany(Configuracion::class);
+    }
+
     /**
      * Get the attributes that should be cast.
      *

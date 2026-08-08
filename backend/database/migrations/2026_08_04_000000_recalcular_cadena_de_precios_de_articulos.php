@@ -39,7 +39,12 @@ return new class extends Migration
                 (float) ($articulo->utilidad_porcentaje ?? $articulo->utilidad_catalogo),
             );
 
-            DB::table('articulos')->where('id', $articulo->id)->update($cadena);
+            // Solo las dos columnas persistidas: `calcularCadena` devuelve además el costo total,
+            // que es una suma de columnas y no tiene columna propia (ver 014-costo-elaboracion-goma.md).
+            DB::table('articulos')->where('id', $articulo->id)->update([
+                'costo_con_descuento' => $cadena['costo_con_descuento'],
+                'precio_unitario_sin_iva' => $cadena['precio_unitario_sin_iva'],
+            ]);
         }
     }
 

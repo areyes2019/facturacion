@@ -15,7 +15,9 @@ interface CasoDelFixture {
   precio_proveedor: number
   descuento: number
   utilidad_porcentaje: number
+  costo_goma: number
   costo_con_descuento: number
+  costo_total: number
   precio_unitario_sin_iva: number
   utilidad: number
 }
@@ -31,11 +33,33 @@ describe('cadena de precios contra el fixture compartido', () => {
   })
 
   it.each(casos)('$descripcion', (caso) => {
-    const cadena = calcularCadena(caso.precio_proveedor, caso.descuento, caso.utilidad_porcentaje)
+    const cadena = calcularCadena(
+      caso.precio_proveedor,
+      caso.descuento,
+      caso.utilidad_porcentaje,
+      caso.costo_goma,
+    )
 
     expect(cadena.costo_con_descuento).toBe(caso.costo_con_descuento)
+    expect(cadena.costo_total).toBe(caso.costo_total)
     expect(cadena.precio_unitario_sin_iva).toBe(caso.precio_unitario_sin_iva)
     expect(cadena.utilidad).toBe(caso.utilidad)
+  })
+
+  it('sin goma la cadena queda idéntica a la de 011', () => {
+    // Con costo_goma en 0 la fórmula nueva y la vieja son la misma operación. Omitir el argumento
+    // debe dar exactamente lo mismo que pasar 0 (ver specs/014-costo-elaboracion-goma.md).
+    for (const caso of casos.filter((c) => c.costo_goma === 0)) {
+      const sinArgumento = calcularCadena(
+        caso.precio_proveedor,
+        caso.descuento,
+        caso.utilidad_porcentaje,
+      )
+
+      expect(sinArgumento.costo_total).toBe(caso.costo_con_descuento)
+      expect(sinArgumento.precio_unitario_sin_iva).toBe(caso.precio_unitario_sin_iva)
+      expect(sinArgumento.utilidad).toBe(caso.utilidad)
+    }
   })
 })
 

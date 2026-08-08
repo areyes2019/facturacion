@@ -37,7 +37,10 @@ class ArticuloResource extends JsonResource
                 'catalogo',
                 fn () => PrecioArticuloCalculator::utilidadEfectiva($this->resource, $this->catalogo)
             ),
+            'tamano_goma' => $this->tamano_goma?->value,
+            'costo_goma' => (float) $this->costo_goma,
             'costo_con_descuento' => (float) $this->costo_con_descuento,
+            'costo_total' => $this->costo_total,
             'precio_unitario_sin_iva' => (float) $this->precio_unitario_sin_iva,
             'precio_unitario_con_iva' => $this->precio_unitario_con_iva,
             'utilidad' => $this->utilidad,

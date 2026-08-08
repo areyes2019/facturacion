@@ -50,6 +50,35 @@ documentación del design system.
   desarrollo, que muestra los tokens (colores, tipografía, spacing) y cada componente base con
   sus variantes, a modo de documentación viva.
 
+### Primitivos de menú: cuál usar
+
+El proyecto usa tres primitivos flotantes de shadcn-vue / Reka UI, y la elección no es de gusto:
+cada uno se anuncia distinto a los lectores de pantalla y aporta un juego distinto de atajos de
+teclado.
+
+| Primitivo | Cuándo | Ejemplo |
+| --- | --- | --- |
+| `NavigationMenu` | El contenido son **solo destinos de navegación** | Grupos Ventas / Compras / Inventario / Contabilidad ([013](013-navegacion-principal.md)) |
+| `DropdownMenu` | El contenido **mezcla destinos y acciones**, o son solo acciones | Menú de usuario: Configuración (destino) + Cerrar sesión (acción) ([013](013-navegacion-principal.md)) |
+| `Popover` | El contenido **no es un menú**: es un panel con campos, texto o controles | Filtros, ayuda contextual |
+
+La regla práctica: si al abrirlo el usuario espera una lista de opciones que se recorre con las
+flechas, es un menú (`NavigationMenu` o `DropdownMenu`). Si espera un panelito con contenido, es un
+`Popover`. Y entre los dos menús, decide si hay al menos una entrada que **hace algo** en vez de
+llevar a otra pantalla: si la hay, es `DropdownMenu`.
+
+### Incorporar un primitivo nuevo
+
+Cada `npx shadcn-vue add ...` reescribe bloques enteros de `src/style.css` (ver "Estado de
+implementación"). El paso posterior **no es opcional**: comparar `src/style.css` contra su estado
+previo y revertir lo que el CLI haya sobrescrito, en particular el `@import` de Google Fonts, el
+`@theme` y el `@layer base`.
+
+No es una hipótesis: ocurrió al instalar `navigation-menu` en [013](013-navegacion-principal.md) y
+volvió a ocurrir, idéntico, al instalar `dropdown-menu` en
+[014](014-costo-elaboracion-goma.md) — en ambos casos el CLI dejó la aplicación sin Open Sans. La
+forma más rápida de verificarlo es comparar el hash del archivo antes y después del `add`.
+
 ## Fuera de alcance
 
 - Modo oscuro (dark mode).
@@ -132,6 +161,11 @@ Implementada el 2026-07-30.
    base con sus variantes.
 6. El diseño es responsive y usable correctamente en viewports mobile, tablet y desktop.
 7. ESLint/Prettier corren sin errores sobre el código nuevo.
+8. La elección entre `NavigationMenu`, `DropdownMenu` y `Popover` sigue la regla documentada: solo
+   destinos → `NavigationMenu`; destinos mezclados con acciones, o solo acciones → `DropdownMenu`;
+   contenido que no es una lista de opciones → `Popover`.
+9. Tras cada `npx shadcn-vue add`, `src/style.css` conserva íntegros el `@import` de Google Fonts
+   con ambas familias, el `@theme` y los tokens propios.
 
 ## Supuestos asumidos (registro completo)
 
@@ -154,6 +188,9 @@ Implementada el 2026-07-30.
     solo en desarrollo) que muestra los componentes base y tokens, en vez de un archivo Figma
     externo.
 11. Componentes base a crear en `components/ui/`: Button, Input, Card, Alert/Toast, Badge, Modal.
+    El inventario crece conforme lo piden las historias siguientes (Combobox, Label, Popover,
+    Select, Table, NavigationMenu, DropdownMenu); esta spec no congela la lista, pero sí es la
+    dueña de la regla para elegir entre primitivos equivalentes.
 12. Iconografía: Heroicons.
 13. No se usa ninguna herramienta de diseño externa (Figma/Sketch/XD); wireframe y mockup se
     construyen directamente en código Vue + Tailwind.

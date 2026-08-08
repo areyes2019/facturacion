@@ -16,7 +16,10 @@ export interface Articulo {
   precio_proveedor: number
   utilidad_porcentaje: number | null
   utilidad_porcentaje_efectivo: number | null
+  tamano_goma: string | null
+  costo_goma: number
   costo_con_descuento: number
+  costo_total: number
   precio_unitario_sin_iva: number
   precio_unitario_con_iva: number
   utilidad: number
@@ -33,6 +36,7 @@ export interface ArticuloPayload {
   objeto_imp: string | null
   precio_proveedor: number | null
   utilidad_porcentaje: number | null
+  tamano_goma: string | null
 }
 
 export interface ImportarCsvReporte {
@@ -46,8 +50,11 @@ interface PaginationMeta {
   total: number
 }
 
-/** Columnas numéricas ordenables del listado (ver 011-precio-proveedor-utilidad.md). */
-export type ArticuloSort = 'costo_con_descuento' | 'precio_unitario_sin_iva' | 'utilidad'
+/**
+ * Columnas numéricas ordenables del listado (ver 011-precio-proveedor-utilidad.md). El costo que se
+ * muestra y por el que se ordena es el total, aparato + goma (ver 014-costo-elaboracion-goma.md).
+ */
+export type ArticuloSort = 'costo_total' | 'precio_unitario_sin_iva' | 'utilidad'
 export type SortDirection = 'asc' | 'desc'
 
 export const useArticulosStore = defineStore('articulos', {
