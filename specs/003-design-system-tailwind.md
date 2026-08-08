@@ -67,6 +67,27 @@ flechas, es un menú (`NavigationMenu` o `DropdownMenu`). Si espera un panelito 
 `Popover`. Y entre los dos menús, decide si hay al menos una entrada que **hace algo** en vez de
 llevar a otra pantalla: si la hay, es `DropdownMenu`.
 
+### La ausencia de selección en un `Select`
+
+`Select` de Reka UI reserva la **cadena vacía** para su `v-model`: asignarla limpia la selección y
+muestra el `placeholder`. Como contrapartida, ningún `SelectItem` puede valer `''` — el primitivo lo
+rechaza al montarse y esa opción no llega a renderizarse.
+
+Cuando "ninguno" es una elección legítima del usuario y no un "falta capturar" (Sin goma en
+[014](014-costo-elaboracion-goma.md), "Todos los estados" en un filtro), esa opción se declara con
+un **valor centinela** junto al resto de las opciones (`'sin-goma'`, `'todos'`) y se traduce a
+`''`/`null` en el límite del formulario, con un `computed` de lectura y escritura. El estado del
+formulario nunca guarda el centinela: lo ve el `Select` y nadie más.
+
+La distinción con el `placeholder` no es cosmética. El `placeholder` dice "falta elegir" y se pinta
+en `text-muted-foreground`; una opción seleccionada dice "elegí que no" y se pinta como cualquier
+otro valor. Un `Select` donde el único camino de vuelta a "ninguno" sea recargar la pantalla está
+mal construido, aunque el `placeholder` muestre la frase correcta.
+
+La regla la hace cumplir ESLint (`vue/no-restricted-static-attribute` sobre `SelectItem`), de modo
+que la aplicación no puede volver a quedarse sin esa opción. No alcanza a los `<select>` nativos,
+donde `<option value="">` es válido y de uso corriente en los filtros de los listados.
+
 ### Incorporar un primitivo nuevo
 
 Cada `npx shadcn-vue add ...` reescribe bloques enteros de `src/style.css` (ver "Estado de
@@ -146,6 +167,15 @@ Implementada el 2026-07-30.
   - **Pendiente**: esta regla queda documentada aquí como referencia para todos los `Dialog`
     existentes y futuros; su aplicación al modal concreto de importación CSV se registra como
     trabajo pendiente en [006-gestion-articulos.md](006-gestion-articulos.md).
+- **Regla de la opción "ninguno" en un `Select`** (agregada el 2026-08-07, tras detectarse que el
+  selector de tamaño de goma de [014](014-costo-elaboracion-goma.md) se quedaba sin su opción "Sin
+  goma"): Reka UI lanza en `setup` si un `SelectItem` vale cadena vacía, y `SelectContent` monta sus
+  opciones en un `DocumentFragment` oculto aun con el desplegable cerrado, así que el error aparece
+  al entrar a la pantalla y no al abrir el control. El resto de las opciones sí monta, de modo que
+  el síntoma visible no es una pantalla rota sino una opción ausente. La regla resultante quedó
+  arriba, en "La ausencia de selección en un `Select`", y se hace cumplir con
+  `vue/no-restricted-static-attribute` en `eslint.config.js`. `vue-tsc` no puede detectarlo —
+  `''` es un `string` válido y la restricción es de tiempo de ejecución.
 
 ## Criterios de aceptación
 

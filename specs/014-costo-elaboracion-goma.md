@@ -375,6 +375,11 @@ Grande     $ [ 20.00 ]   Hasta 75 × 38 mm o superior
   El costo vigente se muestra **dentro de cada opción**, tomado de `GET /api/v1/configuracion`. Es
   donde el dato hace falta: al elegir, no después.
 
+  "Sin goma" es una **opción real de la lista**, no solo el texto del `placeholder`: quien eligió un
+  tamaño puede volver a dejar el artículo sin goma sin recargar la pantalla. Se declara con el valor
+  centinela que exige la regla de [003](003-design-system-tailwind.md) y se traduce a `NULL` al
+  guardar; `tamano_goma` en el estado del formulario nunca contiene el centinela.
+
 - **El bloque de resumen gana dos renglones cuando hay goma seleccionada**:
 
   ```
@@ -492,6 +497,16 @@ Implementada el 2026-08-07.
   resto de las historias). Falta confirmar a ojo el menú de usuario en 375 / 768 / 1440 px, el
   diálogo de confirmación de `/configuracion`, el selector de goma con los costos en sus opciones y
   el bloque de resumen con y sin goma.
+- **El selector de goma se quedaba sin su opción "Sin goma"** (detectado el 2026-08-07 en la primera
+  verificación en navegador, corregido el mismo día): se había declarado como `<SelectItem
+  value="">`, y Reka UI reserva la cadena vacía para limpiar la selección. El error no se veía al
+  abrir el desplegable sino al entrar a `/articulos/crear` y `/articulos/:id/editar`, porque
+  `SelectContent` monta sus opciones en un `DocumentFragment` oculto aun estando cerrado. Como el
+  `placeholder` dice "Sin goma", el alta se veía correcta y el hueco solo aparecía al querer quitarle
+  la goma a un artículo. Se pasó a un valor centinela y la restricción quedó escrita como regla
+  general del design system en [003](003-design-system-tailwind.md), con la regla de ESLint que la
+  hace cumplir. Ni `vue-tsc` ni `npm run build` podían atraparlo, y las suites de Vitest solo cubren
+  `src/lib/`: era exactamente lo que la verificación visual pendiente tenía que encontrar.
 - **Pendiente**: `Prettier --check` reporta 28 archivos, pero ya reportaba 32 antes de esta historia
   (los componentes vendored de `ui/` y otras vistas). Se formatearon solo los archivos tocados aquí.
   Dejar el repo entero limpio de Prettier es un paso aparte.
@@ -499,7 +514,9 @@ Implementada el 2026-08-07.
 ## Criterios de aceptación
 
 1. Un usuario autenticado puede asignar a un artículo un tamaño de goma (Chica, Mediana o Grande) o
-   dejarlo sin goma; sin goma es el valor por defecto al crear.
+   dejarlo sin goma; sin goma es el valor por defecto al crear. "Sin goma" está disponible como
+   opción del selector en todo momento, de modo que un artículo con goma puede volver a quedarse sin
+   ella en la misma sesión de edición.
 2. Al guardar, el sistema suma el costo vigente del tamaño elegido al costo del artículo y calcula
    el precio de venta sobre ese costo total. Un aparato de $200.00 en un catálogo sin descuento, con
    goma mediana a $10.00 y 25% de utilidad, produce costo total $210.00, precio de venta sin IVA

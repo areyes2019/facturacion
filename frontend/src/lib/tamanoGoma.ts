@@ -18,6 +18,16 @@ export interface TamanoGoma {
   clave: keyof Configuracion
 }
 
+/**
+ * Valor centinela de la opción "Sin goma" del selector.
+ *
+ * Reka UI reserva la cadena vacía para limpiar la selección de un `Select`, así que la ausencia de
+ * goma necesita un valor propio para poder ser una opción de la lista (ver
+ * specs/003-design-system-tailwind.md). Vive solo entre el `Select` y el formulario: nunca se
+ * guarda en el estado ni viaja al backend, que sigue recibiendo `null`.
+ */
+export const SIN_GOMA = 'sin-goma'
+
 export const TAMANOS_GOMA: TamanoGoma[] = [
   {
     valor: 'chica',

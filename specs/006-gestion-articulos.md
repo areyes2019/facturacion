@@ -87,6 +87,40 @@ en sí, ni inventario/existencias.
   - `precio_unitario_sin_iva`: requerido, numérico, mayor a 0, máximo 2 decimales.
   - Fila de importación CSV: mismas reglas que el alta individual, aplicadas por fila; el
     `proveedor_id` se toma de la ruta, no de la fila.
+- **Codificación del archivo CSV**: el importador acepta **UTF-8 (con o sin BOM) y Windows-1252**,
+  y transcodifica a UTF-8 antes de parsear. Las tres son las que produce una hoja de cálculo según
+  la opción de guardado que elija el usuario, y ninguna es una elección informada: "CSV (delimitado
+  por comas)" de Excel en español escribe en la codificación ANSI del sistema, y "CSV UTF-8"
+  antepone un BOM. El archivo se detecta por su contenido, no por su nombre ni por un encabezado
+  declarado.
+
+  No es una comodidad: un artículo llamado `Sello redondo de Ø X 45 mm` guardado en Windows-1252
+  llega con bytes que no son UTF-8 válido, y a partir de ahí **ninguna capa del sistema puede
+  representarlo** — la respuesta JSON del reporte de importación falla al serializarse y el usuario
+  recibe un error de codificación en vez del resultado de su importación. La conversión ocurre en la
+  puerta de entrada, de modo que todo lo que circula por dentro del sistema ya es UTF-8 válido.
+
+  El BOM se retira antes de leer el encabezado: si sobrevive, la primera columna deja de llamarse
+  `nombre` y el archivo entero se rechaza fila por fila reclamando un campo que sí está presente.
+- **Normalización de las celdas del CSV antes de validar**: una hoja de cálculo reescribe las celdas
+  al guardar el archivo, y esas reescrituras no son errores del usuario. Cada columna de valor
+  cerrado se lleva a su forma canónica antes de aplicar la regla:
+  - `clave_unidad` a mayúsculas.
+  - `objeto_imp` **rellenado con cero a la izquierda** cuando la celda trae un solo dígito: Excel y
+    Google Sheets tratan `02` como número y lo escriben de vuelta como `2`, y esta es la única
+    columna del archivo con cero inicial. Sin esta normalización, un CSV exportado por el propio
+    sistema deja de ser importable con solo abrirlo y guardarlo, que es justo lo que el usuario hace
+    para editarlo.
+  - `tamano_goma` a minúsculas y sin espacios alrededor (ver
+    [014](014-costo-elaboracion-goma.md)).
+
+  La normalización **no relaja la validación**: un valor que sigue sin corresponder a la lista
+  cerrada tras normalizarse rechaza su fila como cualquier otro dato inválido.
+- **El motivo de una fila rechazada nombra la columna y el valor recibido**, no solo la regla que
+  falló: `objeto_imp "9" no es un valor válido (01, 02, 03, 04)`. Un archivo de decenas de filas con
+  el mismo defecto produce decenas de motivos idénticos, y sin el valor concreto el usuario no tiene
+  cómo saber qué corregir en su hoja. Aplica a las columnas de lista cerrada (`objeto_imp`,
+  `tamano_goma`), donde el mensaje genérico del framework no dice nada útil.
 - Respuestas mediante Laravel API Resources (`ArticuloResource`), consistente con la convención de
   001/004/005.
 
@@ -235,6 +269,23 @@ Implementada el 2026-07-31.
   abrir `/articulos` con un proveedor de nombre largo para confirmar que el texto se trunca con
   elipsis, el tooltip muestra el nombre completo, y el botón "Eliminar" permanece visible sin
   scroll horizontal.
+- **Corregido (reportado el 2026-08-07, corregido el mismo día)**: una importación real de 36 filas
+  falló entera con `The selected objeto imp is invalid`. El archivo se había preparado en una hoja
+  de cálculo, que interpretó `02` como número y lo guardó como `2`; `objeto_imp` es la única columna
+  del CSV con cero inicial, así que fue la única afectada y las dos claves SAT de la misma fila
+  validaban sin problema. Se agregó el relleno con cero a la izquierda junto a las normalizaciones
+  que ya existían para `clave_unidad` y `tamano_goma`, y los motivos de las columnas de lista
+  cerrada pasaron a nombrar la columna y el valor recibido: el mensaje del framework, repetido 36
+  veces sin decir qué valor había leído, no daba forma de llegar a la causa.
+- **Corregido (reportado el 2026-08-07, corregido el mismo día)**: el mismo archivo, ya con las
+  claves de objeto de impuesto corregidas, falló entero con `Malformed UTF-8 characters, possibly
+  incorrectly encoded`. La hoja de cálculo lo había guardado en Windows-1252, donde la `Ø` de
+  `Sello redondo de Ø X 45 mm` es el byte `0xD8`; ese byte no es UTF-8 válido, así que la respuesta
+  JSON del reporte no podía serializarse y el error de codificación sustituía al resultado de la
+  importación. Se transcodifica el archivo a UTF-8 al abrirlo, junto con el retiro del BOM que
+  antepone la opción "CSV UTF-8" de Excel — el otro camino por el que el usuario habría llegado al
+  mismo callejón. La detección es por contenido: `mb_check_encoding` sobre el archivo completo, una
+  sola vez.
 
 ## Criterios de aceptación
 
@@ -262,12 +313,19 @@ Implementada el 2026-07-31.
 11. Exportar el listado de artículos genera un CSV con las columnas
     `nombre,modelo,clave_prod_serv,clave_unidad,objeto_imp,precio_unitario_sin_iva`, editable y
     reimportable directamente para un proveedor.
-12. Pint y ESLint/Prettier corren sin errores sobre el código nuevo.
-13. El modal de importación CSV se muestra completo dentro de los límites del `Dialog` (sin
+12. Un CSV abierto y guardado en una hoja de cálculo sigue siendo importable: una fila con
+    `objeto_imp` en `2` se importa como `02`, igual que una que traiga `02`. Un valor que no
+    corresponde a ninguna de las cuatro claves aun después de normalizarse rechaza su fila, con un
+    motivo que nombra la columna y el valor recibido.
+13. Un CSV guardado en Windows-1252 se importa con sus acentos y símbolos intactos: un artículo
+    llamado `Sello redondo de Ø X 45 mm` queda con ese mismo nombre. Un CSV guardado como UTF-8 con
+    BOM también se importa, sin que la primera columna se rechace como faltante.
+14. Pint y ESLint/Prettier corren sin errores sobre el código nuevo.
+15. El modal de importación CSV se muestra completo dentro de los límites del `Dialog` (sin
     desbordar contenido ni requerir scroll horizontal) en viewports de escritorio estándar
     (≥1280px), tanto con el listado de columnas de la descripción como con un archivo seleccionado
     cuyo nombre sea largo (ej. más de 40 caracteres).
-14. En el listado `/articulos`, un artículo cuyo proveedor tiene un `nombre_comercial` largo (ej.
+16. En el listado `/articulos`, un artículo cuyo proveedor tiene un `nombre_comercial` largo (ej.
     más de 40 caracteres) muestra ese nombre truncado con elipsis en su celda y el nombre completo
     en un tooltip (atributo `title`) al pasar el mouse; el botón "Eliminar" de esa fila permanece
     dentro del área visible de la tabla, sin requerir scroll horizontal, en viewports de escritorio

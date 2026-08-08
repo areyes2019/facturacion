@@ -11,6 +11,7 @@ use App\Models\Articulo;
 use App\Models\Catalogo;
 use App\Rules\ClaveProdServValido;
 use App\Rules\ClaveUnidadValido;
+use App\Rules\ValorDeEnum;
 use App\Services\ConfiguracionService;
 use App\Services\PrecioArticuloCalculator;
 use Illuminate\Contracts\Database\Eloquent\Builder;
@@ -158,7 +159,7 @@ class ArticuloController extends Controller
         // se calcula una sola vez fuera del bucle porque no cambia entre filas.
         $catalogosDelProveedor = Catalogo::query()->where('proveedor_id', $catalogo->proveedor_id)->pluck('id');
 
-        $handle = fopen($request->file('archivo')->getRealPath(), 'r');
+        $handle = $this->abrirCsvComoUtf8($request->file('archivo')->getRealPath());
         $columnas = array_map(fn ($columna) => trim((string) $columna), fgetcsv($handle) ?: []);
 
         $importados = 0;
@@ -183,13 +184,15 @@ class ArticuloController extends Controller
             // misma categoría.
             $tamano = strtolower(trim((string) ($datos['tamano_goma'] ?? '')));
 
+            $objetoImpuesto = $this->normalizarObjetoImpuesto((string) ($datos['objeto_imp'] ?? ''));
+
             $validator = Validator::make(
                 [
                     'nombre' => trim((string) ($datos['nombre'] ?? '')),
                     'modelo' => trim((string) ($datos['modelo'] ?? '')),
                     'clave_prod_serv' => trim((string) ($datos['clave_prod_serv'] ?? '')),
                     'clave_unidad' => strtoupper(trim((string) ($datos['clave_unidad'] ?? ''))),
-                    'objeto_imp' => trim((string) ($datos['objeto_imp'] ?? '')),
+                    'objeto_imp' => $objetoImpuesto,
                     'precio_proveedor' => trim((string) ($datos['precio_proveedor'] ?? '')),
                     'utilidad_porcentaje' => $utilidad === '' ? null : $utilidad,
                     'tamano_goma' => $tamano === '' ? null : $tamano,
@@ -206,10 +209,10 @@ class ArticuloController extends Controller
                     'modelo' => ['required', 'string', 'max:255'],
                     'clave_prod_serv' => ['required', 'string', new ClaveProdServValido],
                     'clave_unidad' => ['required', 'string', new ClaveUnidadValido],
-                    'objeto_imp' => ['required', Rule::enum(ObjetoImpuesto::class)],
+                    'objeto_imp' => ['required', new ValorDeEnum(ObjetoImpuesto::class)],
                     'precio_proveedor' => ['required', 'numeric', 'gt:0', 'decimal:0,2'],
                     'utilidad_porcentaje' => ['nullable', 'numeric', 'gte:0', 'lte:999.99', 'decimal:0,2'],
-                    'tamano_goma' => ['nullable', Rule::enum(TamanoGoma::class)],
+                    'tamano_goma' => ['nullable', new ValorDeEnum(TamanoGoma::class)],
                 ],
             );
 
@@ -276,6 +279,63 @@ class ArticuloController extends Controller
 
             fclose($handle);
         }, 'articulos.csv', ['Content-Type' => 'text/csv']);
+    }
+
+    /**
+     * Abre el CSV subido con su contenido ya en UTF-8 y sin BOM (ver 006-gestion-articulos.md).
+     *
+     * Una hoja de cálculo escribe el archivo en la codificación que corresponda a la opción de
+     * guardado elegida, no en la que el sistema espera: "CSV (delimitado por comas)" de Excel en
+     * español usa la ANSI del sistema (Windows-1252) y "CSV UTF-8" antepone un BOM. Un byte que no
+     * es UTF-8 válido rompe la serialización JSON de la respuesta, así que la conversión va en la
+     * puerta de entrada y no más adentro.
+     *
+     * Se detecta por contenido y una sola vez: un archivo es de una codificación o de la otra, no
+     * de las dos. El parseo sigue en manos de `fgetcsv` sobre un stream, para no perder las celdas
+     * entrecomilladas con saltos de línea.
+     *
+     * @return resource
+     */
+    private function abrirCsvComoUtf8(string $ruta)
+    {
+        $contenido = (string) file_get_contents($ruta);
+
+        if (! mb_check_encoding($contenido, 'UTF-8')) {
+            $contenido = mb_convert_encoding($contenido, 'UTF-8', 'Windows-1252');
+        }
+
+        // El BOM sobrevive a `trim`, y con él la primera columna deja de llamarse `nombre`: el
+        // archivo entero se rechazaría reclamando un campo que sí está presente.
+        $contenido = preg_replace('/^\xEF\xBB\xBF/', '', $contenido) ?? $contenido;
+
+        $handle = fopen('php://temp', 'r+');
+        fwrite($handle, $contenido);
+        rewind($handle);
+
+        return $handle;
+    }
+
+    /**
+     * Lleva la celda de objeto de impuesto a su forma canónica de dos dígitos.
+     *
+     * Una hoja de cálculo trata `02` como número y lo guarda de vuelta como `2`, y esta es la única
+     * columna del CSV con cero inicial: sin esta normalización, el archivo que el propio sistema
+     * exporta deja de ser importable con solo abrirlo y guardarlo (ver 006-gestion-articulos.md).
+     * Cualquier otra cosa se deja intacta para que la validación la rechace y la reporte.
+     */
+    private function normalizarObjetoImpuesto(string $celda): string
+    {
+        $valor = trim($celda);
+
+        if (preg_match('/^\d$/', $valor) !== 1) {
+            return $valor;
+        }
+
+        $canonico = str_pad($valor, 2, '0', STR_PAD_LEFT);
+
+        // Se repone el cero solo si con él la clave existe: un dígito que no corresponde a ninguna
+        // se deja como llegó, para que el motivo reporte lo que el usuario tiene en su hoja.
+        return ObjetoImpuesto::tryFrom($canonico) !== null ? $canonico : $valor;
     }
 
     /**

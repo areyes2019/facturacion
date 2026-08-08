@@ -6,7 +6,7 @@ import { useCatalogosStore } from '../stores/catalogos'
 import { useConfiguracionStore } from '../stores/configuracion'
 import { extractErrorMessage, extractFieldErrors } from '../lib/errors'
 import { calcularCadena, precioConIva, redondeo2 } from '../lib/precioArticulo'
-import { etiquetaGoma, TAMANOS_GOMA } from '../lib/tamanoGoma'
+import { etiquetaGoma, SIN_GOMA, TAMANOS_GOMA } from '../lib/tamanoGoma'
 import { Button } from '../components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Input } from '../components/ui/input'
@@ -91,6 +91,17 @@ const precioProveedor = computed(() => {
 const costoGoma = computed(() => configuracion.costoGoma(form.tamano_goma))
 const llevaGoma = computed(() => form.tamano_goma !== '')
 const etiquetaDeGoma = computed(() => etiquetaGoma(form.tamano_goma))
+
+// "Sin goma" viaja por el Select con un valor centinela y se traduce aquí, porque Reka UI reserva
+// la cadena vacía para limpiar la selección (ver 003-design-system-tailwind.md). El formulario
+// sigue guardando '' para la ausencia de goma, que es lo que el resto de la vista y el payload
+// esperan.
+const tamanoSeleccionado = computed({
+  get: () => form.tamano_goma || SIN_GOMA,
+  set: (valor: string) => {
+    form.tamano_goma = valor === SIN_GOMA ? '' : valor
+  },
+})
 
 // Cadena completa calculada con el mismo módulo que espeja al backend (ver
 // 011-precio-proveedor-utilidad.md). Ninguna vista calcula precios por su cuenta.
@@ -330,12 +341,12 @@ async function onSubmit() {
               <Label for="tamano_goma">Tamaño de goma</Label>
               <!-- El costo vigente va dentro de cada opción: es donde el dato hace falta, al
                    elegir, no después (ver 014-costo-elaboracion-goma.md). -->
-              <Select v-model="form.tamano_goma">
+              <Select v-model="tamanoSeleccionado">
                 <SelectTrigger id="tamano_goma" class="w-full">
                   <SelectValue placeholder="Sin goma" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Sin goma</SelectItem>
+                  <SelectItem :value="SIN_GOMA">Sin goma</SelectItem>
                   <SelectItem
                     v-for="tamano in TAMANOS_GOMA"
                     :key="tamano.valor"

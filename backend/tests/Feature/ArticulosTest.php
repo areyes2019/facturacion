@@ -375,6 +375,104 @@ test('importar un csv con filas invalidas importa las validas y reporta las inva
     $this->assertDatabaseMissing('articulos', ['catalogo_id' => $catalogo->id, 'nombre' => 'Articulo con clave invalida']);
 });
 
+test('la importacion csv repone el cero inicial del objeto de impuesto que se come una hoja de calculo', function () {
+    $user = User::factory()->create();
+    $catalogo = Catalogo::factory()->for($user)->create();
+
+    $csv = "nombre,modelo,clave_prod_serv,clave_unidad,objeto_imp,precio_proveedor\n"
+        ."Sello redondo,R-45,43211503,H87,2,188.23\n"
+        ."Sello cuadrado,C-30,43211503,H87,02,150\n";
+    $archivo = UploadedFile::fake()->createWithContent('articulos.csv', $csv);
+
+    $response = $this->actingAs($user)->postJson("/api/v1/catalogos-proveedor/{$catalogo->id}/articulos/importar-csv", [
+        'archivo' => $archivo,
+    ]);
+
+    $response->assertOk();
+    $response->assertJsonPath('importados', 2);
+    $response->assertJsonPath('errores', []);
+    $this->assertDatabaseHas('articulos', ['nombre' => 'Sello redondo', 'objeto_imp' => '02']);
+    $this->assertDatabaseHas('articulos', ['nombre' => 'Sello cuadrado', 'objeto_imp' => '02']);
+});
+
+test('la importacion csv acepta un archivo guardado en windows-1252', function () {
+    $user = User::factory()->create();
+    $catalogo = Catalogo::factory()->for($user)->create();
+
+    $csv = "nombre,modelo,clave_prod_serv,clave_unidad,objeto_imp,precio_proveedor\n"
+        ."Sello redondo de Ø X 45 mm,Printer R 45,43211503,H87,02,188.23\n"
+        ."Sello de goma para diseño,MOD-2,43211503,H87,02,100\n";
+    $archivo = UploadedFile::fake()->createWithContent(
+        'articulos.csv',
+        mb_convert_encoding($csv, 'Windows-1252', 'UTF-8'),
+    );
+
+    $response = $this->actingAs($user)->postJson("/api/v1/catalogos-proveedor/{$catalogo->id}/articulos/importar-csv", [
+        'archivo' => $archivo,
+    ]);
+
+    $response->assertOk();
+    $response->assertJsonPath('importados', 2);
+    $response->assertJsonPath('errores', []);
+    $this->assertDatabaseHas('articulos', ['nombre' => 'Sello redondo de Ø X 45 mm']);
+    $this->assertDatabaseHas('articulos', ['nombre' => 'Sello de goma para diseño']);
+});
+
+test('la importacion csv acepta un archivo utf-8 con bom', function () {
+    $user = User::factory()->create();
+    $catalogo = Catalogo::factory()->for($user)->create();
+
+    $csv = "\xEF\xBB\xBFnombre,modelo,clave_prod_serv,clave_unidad,objeto_imp,precio_proveedor\n"
+        ."Sello redondo de Ø X 45 mm,Printer R 45,43211503,H87,02,188.23\n";
+    $archivo = UploadedFile::fake()->createWithContent('articulos.csv', $csv);
+
+    $response = $this->actingAs($user)->postJson("/api/v1/catalogos-proveedor/{$catalogo->id}/articulos/importar-csv", [
+        'archivo' => $archivo,
+    ]);
+
+    $response->assertOk();
+    $response->assertJsonPath('importados', 1);
+    $response->assertJsonPath('errores', []);
+    $this->assertDatabaseHas('articulos', ['nombre' => 'Sello redondo de Ø X 45 mm']);
+});
+
+test('un objeto de impuesto desconocido rechaza la fila nombrando la columna y el valor recibido', function () {
+    $user = User::factory()->create();
+    $catalogo = Catalogo::factory()->for($user)->create();
+
+    $csv = "nombre,modelo,clave_prod_serv,clave_unidad,objeto_imp,precio_proveedor\n"
+        ."Sello redondo,R-45,43211503,H87,9,188.23\n";
+    $archivo = UploadedFile::fake()->createWithContent('articulos.csv', $csv);
+
+    $response = $this->actingAs($user)->postJson("/api/v1/catalogos-proveedor/{$catalogo->id}/articulos/importar-csv", [
+        'archivo' => $archivo,
+    ]);
+
+    $response->assertOk();
+    $response->assertJsonPath('importados', 0);
+    expect($response->json('errores.0.motivo'))
+        ->toContain('objeto_imp "9"')
+        ->toContain('01, 02, 03, 04');
+});
+
+test('un tamano de goma desconocido reporta la columna y el valor recibido', function () {
+    $user = User::factory()->create();
+    $catalogo = Catalogo::factory()->for($user)->create();
+
+    $csv = "nombre,modelo,clave_prod_serv,clave_unidad,objeto_imp,precio_proveedor,utilidad_porcentaje,tamano_goma\n"
+        ."Sello redondo,R-45,43211503,H87,02,188.23,,enorme\n";
+    $archivo = UploadedFile::fake()->createWithContent('articulos.csv', $csv);
+
+    $response = $this->actingAs($user)->postJson("/api/v1/catalogos-proveedor/{$catalogo->id}/articulos/importar-csv", [
+        'archivo' => $archivo,
+    ]);
+
+    $response->assertOk();
+    expect($response->json('errores.0.motivo'))
+        ->toContain('tamano_goma "enorme"')
+        ->toContain('chica, mediana, grande');
+});
+
 test('no se puede importar un csv en el catalogo de otro usuario', function () {
     $user = User::factory()->create();
     $otro = User::factory()->create();
